@@ -26,9 +26,23 @@ try:
         json_key = os.environ.get("FIREBASE_KEY")
         if json_key:
             import json
-            service_account_info = json.loads(json_key.strip())
-            cred = credentials.Certificate(service_account_info)
-            log.info("🔍 Cargando Firebase desde variable de entorno FIREBASE_KEY")
+            import re
+            
+            clean_key = json_key.strip()
+            # Robustez extra: Buscar el primer '{' y el último '}' por si se coló basura al copiar
+            match = re.search(r"(\{.*\})", clean_key, re.DOTALL)
+            if match:
+                clean_key = match.group(1)
+            
+            try:
+                service_account_info = json.loads(clean_key)
+                cred = credentials.Certificate(service_account_info)
+                log.info(f"🔍 Cargando Firebase desde env var (Longitud: {len(clean_key)})")
+            except json.JSONDecodeError as je:
+                log.error(f"❌ Error decodificando JSON: {je}")
+                log.error(f"   Primeros 20 chars: {clean_key[:20]}...")
+                log.error(f"   Últimos 20 chars: ...{clean_key[-20:]}")
+                raise je
         # 2. Intentar desde archivo local
         elif os.path.exists("firebase_key.json"):
             cred = credentials.Certificate("firebase_key.json")
