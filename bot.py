@@ -39,7 +39,8 @@ from fractals import detect_fractals
 from firebase_manager import (
     db_add_subscriber, db_remove_subscriber, db_get_subscribers,
     db_save_signal, db_get_active_signals, db_close_signal,
-    db
+    db, db_init_user_account, db_get_user_account, db_is_trial_active,
+    db_toggle_alerts, db_deposit, db_can_receive_signal, SIGNAL_COST
 )
 
 # ─── CONFIG ────────────────────────────────────────────────────────────
@@ -77,6 +78,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── Estado global ─────────────────────────────────────────────────────
+# Estado de depósitos pendientes { chat_id: True }
+awaiting_deposit = {}
+
 bot_state = {
     "last_scan": None,
     "last_signals": [],
@@ -141,23 +145,39 @@ def tg_answer_callback(callback_id):
 def get_main_buttons():
     """Retorna la grilla de botones principales."""
     return [
-        [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "ℹ️ Info del Bot", "callback_data": "cmd_info"}],
-        [{"text": "📜 Últimas Señales", "callback_data": "cmd_history"}, {"text": "💎 Planes VIP", "callback_data": "cmd_vip"}],
-        [{"text": "💰 Precios", "callback_data": "cmd_price"}, {"text": "📈 Activas", "callback_data": "cmd_active"}],
+        [{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "💰 Depositar", "callback_data": "cmd_depositar"}],
+        [{"text": "ℹ️ Información del Bot", "callback_data": "cmd_info"}, {"text": "📊 Últimas Alertas", "callback_data": "cmd_history"}],
     ]
 
 
-def tg_broadcast(text, parse_mode="MarkdownV2"):
-    """Envía un mensaje a TODOS los suscriptores."""
+def tg_broadcast_with_billing(text, parse_mode="MarkdownV2"):
+    """
+    Envía un mensaje a TODOS los suscriptores que pueden recibirlo.
+    Aplica lógica de billing: trial gratuito o cobra $0.50.
+    """
     subs = db_get_subscribers()
     ok_count = 0
+    blocked_count = 0
 
     for chat_id in subs:
-        if tg_send(int(chat_id), text, parse_mode):
-            ok_count += 1
+        reason, can_receive = db_can_receive_signal(int(chat_id))
+        
+        if can_receive:
+            if tg_send(int(chat_id), text, parse_mode):
+                ok_count += 1
+        else:
+            blocked_count += 1
+            if reason == "no_balance":
+                tg_send_buttons(int(chat_id),
+                    "⚠️ *Señal detectada pero no enviada*\n\n"
+                    "Tu prueba gratuita finalizó y no tenés saldo suficiente\\.\n"
+                    f"Cada señal cuesta *$0\\.50 USD*\\.\n\n"
+                    "_Depositá saldo para seguir recibiendo señales\\._",
+                    [[{"text": "💰 Depositar Ahora", "callback_data": "cmd_depositar"}]])
+            # Si es "no_alerts" no enviamos nada (el usuario las desactivó)
         time.sleep(0.05)
 
-    log.info(f"Broadcast enviado: {ok_count}/{len(subs)} OK")
+    log.info(f"Broadcast: {ok_count} enviados, {blocked_count} bloqueados")
     return ok_count
 
 
@@ -330,7 +350,7 @@ def build_signal_message(s):
 
 
 def scan_and_broadcast():
-    """Escanea y transmite señales a todos los suscriptores."""
+    """Escanea y transmite señales con sistema de billing."""
     subs = db_get_subscribers()
     n_subs = len(subs)
     log.info(f"Iniciando scan + broadcast ({n_subs} suscriptores)")
@@ -346,7 +366,7 @@ def scan_and_broadcast():
         db_save_signal(s["pair"], s)
         
         msg = build_signal_message(s)
-        sent = tg_broadcast(msg)
+        sent = tg_broadcast_with_billing(msg)
         log.info(f"Señal {s['pair']} {s['signal']} enviada a {sent} suscriptores")
 
 
@@ -356,16 +376,18 @@ def handle_command(chat_id, text, first_name, username):
     cmd = text.strip().lower().split()[0] if text else ""
 
     if cmd in ["/start", "start"]:
-        db_add_subscriber(chat_id, first_name, username)
+        db_init_user_account(chat_id, first_name, username)
         n = len(db_get_subscribers())
+        is_trial = db_is_trial_active(chat_id)
+        trial_msg = "🆓 *Prueba gratuita:* 15 días activada" if is_trial else ""
         msg = (
             f"✅ *¡Bienvenido\\, {first_name}\\!*\n\n"
             f"Ahora recibirás señales de trading con IA\\.\n\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 *Modelo:* GradientBoosting v7\n"
+            f"🤖 *Modelo:* GradientBoosting v9\n"
             f"📊 *Pares:* 27 instrumentos\n"
             f"⏰ *Scan:* Diario al cierre NY\n"
-            f"💡 *Confianza mínima:* 60%\n"
+            f"{trial_msg}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"Suscriptores activos: *{n}*\n\n"
             f"_Usá los botones de abajo para navegar ⬇️_"
@@ -439,23 +461,75 @@ def handle_callback_query_action(chat_id, action):
     """Procesa las acciones de los botones inline."""
 
     if action == "cmd_cuenta":
-        subs = db_get_subscribers()
-        user = subs.get(str(chat_id), {})
+        user = db_get_user_account(chat_id)
+        if not user:
+            tg_send_buttons(chat_id, "⚠️ *Primero usá /start para crear tu cuenta\\\\.*",
+                [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            return
+        
         joined = user.get("joined", "Desconocido")
+        balance = user.get("balance", 0.0)
+        alerts = user.get("alerts_enabled", True)
+        is_trial = db_is_trial_active(chat_id)
+        total_signals = user.get("total_signals_received", 0)
+        total_spent = user.get("total_spent", 0.0)
+        
+        if is_trial:
+            trial_end = user.get("trial_end", "")[:10]
+            status = f"🆓 Prueba Gratuita \\(hasta {trial_end}\\)"
+        elif balance > 0:
+            status = "💳 Usuario Pago"
+        else:
+            status = "⚠️ Sin saldo"
+        
+        alerts_emoji = "🟢 Activadas" if alerts else "🔴 Desactivadas"
+        toggle_text = "🔴 Desactivar Alertas" if alerts else "🟢 Activar Alertas"
+        
         msg = (
-            f"📊 *Tu Cuenta*\n"
+            f"💼 *Tu Cuenta*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 *Nombre:* {user.get('first_name', 'N/A')}\n"
-            f"🆔 *Chat ID:* `{chat_id}`\n"
-            f"📅 *Miembro desde:* `{joined[:10] if len(joined) > 10 else joined}`\n"
-            f"✅ *Estado:* Activo\n"
-            f"💳 *Plan:* Free\n"
+            f"💵 *Saldo:* ${balance:.2f} USD\n"
+            f"📊 *Estado:* {status}\n"
+            f"🔔 *Alertas:* {alerts_emoji}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Upgrade a VIP para más features_"
+            f"📈 *Señales recibidas:* {total_signals}\n"
+            f"💸 *Total gastado:* ${total_spent:.2f}\n"
+            f"📅 *Miembro desde:* {joined[:10] if len(joined) > 10 else joined}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Costo por señal: $0\\.50 USD_"
         )
         tg_send_buttons(chat_id, msg.replace(".", "\\."), [
-            [{"text": "💎 Ver Planes", "callback_data": "cmd_vip"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+            [{"text": toggle_text, "callback_data": "cmd_toggle_alerts"}],
+            [{"text": "💰 Depositar", "callback_data": "cmd_depositar"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
+
+    elif action == "cmd_toggle_alerts":
+        new_state = db_toggle_alerts(chat_id)
+        if new_state is None:
+            tg_send(chat_id, "⚠️ Error\\. Usá /start primero\\.")
+            return
+        if new_state:
+            tg_send_buttons(chat_id, "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.",
+                [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+        else:
+            tg_send_buttons(chat_id, "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.",
+                [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+
+    elif action == "cmd_depositar":
+        awaiting_deposit[chat_id] = True
+        tg_send_buttons(chat_id,
+            "💰 *Depositar Saldo*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Enviá el monto que querés depositar\\.\n"
+            "Ejemplo: `10` para cargar $10 USD\\.\n\n"
+            "_Respondé con un número para confirmar\\._",
+            [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
+
+    elif action == "cmd_cancel_deposit":
+        awaiting_deposit.pop(chat_id, None)
+        tg_send_buttons(chat_id, "❌ *Depósito cancelado\\.*",
+            [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
 
     elif action == "cmd_info":
         msg = (
@@ -693,9 +767,34 @@ def run_polling():
                 if not msg:
                     continue
                 chat_id = msg["chat"]["id"]
-                text = msg.get("text", "")
+                text = msg.get("text", "").strip()
                 first_name = msg["chat"].get("first_name", "")
                 username = msg["chat"].get("username", "")
+                
+                # Manejar depósitos pendientes
+                if chat_id in awaiting_deposit and text:
+                    try:
+                        amount = float(text.replace(",", ".").replace("$", ""))
+                        if amount > 0:
+                            new_balance = db_deposit(chat_id, amount)
+                            if new_balance is not None:
+                                tg_send_buttons(chat_id,
+                                    f"✅ *Depósito exitoso*\n\n"
+                                    f"💵 Monto: *${amount:.2f} USD*\n"
+                                    f"💰 Nuevo saldo: *${new_balance:.2f} USD*\n\n"
+                                    f"_Tenés para {int(new_balance / SIGNAL_COST)} señales\\._".replace(".", "\\."),
+                                    [[{"text": "💼 Ver Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+                            else:
+                                tg_send(chat_id, "❌ Error al depositar\\. Intentá de nuevo\\.")
+                            awaiting_deposit.pop(chat_id, None)
+                            continue
+                        else:
+                            tg_send(chat_id, "⚠️ El monto debe ser mayor a 0\\.")
+                            continue
+                    except ValueError:
+                        # No es un número, procesar como comando normal
+                        awaiting_deposit.pop(chat_id, None)
+                
                 handle_command(chat_id, text, first_name, username)
         except KeyboardInterrupt:
             log.info("Bot detenido.")
