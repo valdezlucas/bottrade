@@ -38,7 +38,8 @@ from features import create_features
 from fractals import detect_fractals
 from firebase_manager import (
     db_add_subscriber, db_remove_subscriber, db_get_subscribers,
-    db_save_signal, db_get_active_signals, db_close_signal
+    db_save_signal, db_get_active_signals, db_close_signal,
+    db
 )
 
 # ─── CONFIG ────────────────────────────────────────────────────────────
@@ -103,6 +104,47 @@ def tg_send(chat_id, text, parse_mode="MarkdownV2"):
     except Exception as e:
         log.error(f"Error enviando a {chat_id}: {e}")
         return False
+
+
+def tg_send_buttons(chat_id, text, buttons, parse_mode="MarkdownV2"):
+    """Envía un mensaje con botones inline."""
+    keyboard = {"inline_keyboard": buttons}
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "reply_markup": keyboard,
+            },
+            timeout=10,
+        )
+        return r.json().get("ok", False)
+    except Exception as e:
+        log.error(f"Error enviando botones a {chat_id}: {e}")
+        return False
+
+
+def tg_answer_callback(callback_id):
+    """Responde un callback para sacar el 'loading' del botón."""
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": callback_id},
+            timeout=5,
+        )
+    except:
+        pass
+
+
+def get_main_buttons():
+    """Retorna la grilla de botones principales."""
+    return [
+        [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "ℹ️ Info del Bot", "callback_data": "cmd_info"}],
+        [{"text": "📜 Últimas Señales", "callback_data": "cmd_history"}, {"text": "💎 Planes VIP", "callback_data": "cmd_vip"}],
+        [{"text": "💰 Precios", "callback_data": "cmd_price"}, {"text": "📈 Activas", "callback_data": "cmd_active"}],
+    ]
 
 
 def tg_broadcast(text, parse_mode="MarkdownV2"):
@@ -318,17 +360,17 @@ def handle_command(chat_id, text, first_name, username):
         n = len(db_get_subscribers())
         msg = (
             f"✅ *¡Bienvenido\\, {first_name}\\!*\n\n"
-            f"Ahora recibirás señales de trading en tiempo real\\.\n\n"
+            f"Ahora recibirás señales de trading con IA\\.\n\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 *Modelo:* GradientBoosting multi\\-pair\n"
-            f"📊 *Pares:* EUR/USD, GBP/USD, AUD/USD, NZD/USD, USD/CAD, USD/CHF, EUR/GBP\n"
-            f"⏰ *Scan:* 1x por día al cierre de vela NY\n"
-            f"💡 *Threshold:* 60% confianza mínima\n"
+            f"🤖 *Modelo:* GradientBoosting v7\n"
+            f"📊 *Pares:* 27 instrumentos\n"
+            f"⏰ *Scan:* Diario al cierre NY\n"
+            f"💡 *Confianza mínima:* 60%\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"Suscriptores activos: *{n}*\n\n"
-            f"_Comandos: /stop /status /signal /price_"
+            f"_Usá los botones de abajo para navegar ⬇️_"
         )
-        tg_send(chat_id, msg)
+        tg_send_buttons(chat_id, msg, get_main_buttons())
         log.info(f"/start de {first_name} ({chat_id})")
 
     elif cmd in ["/stop", "stop"]:
@@ -379,6 +421,165 @@ def handle_command(chat_id, text, first_name, username):
         tg_send(chat_id, msg.replace(".", "\\."))
 
     elif cmd in ["/price", "price"]:
+        handle_callback_query_action(chat_id, "cmd_price")
+
+    elif cmd in ["/history", "history"]:
+        handle_callback_query_action(chat_id, "cmd_history")
+
+    elif cmd in ["/menu", "menu"]:
+        tg_send_buttons(chat_id, "🤖 *Menú Principal*", get_main_buttons())
+
+    else:
+        tg_send_buttons(chat_id,
+                "❓ *Usá los botones o los comandos:*\n/start /stop /status /signal /price /history /menu",
+                get_main_buttons())
+
+
+def handle_callback_query_action(chat_id, action):
+    """Procesa las acciones de los botones inline."""
+
+    if action == "cmd_cuenta":
+        subs = db_get_subscribers()
+        user = subs.get(str(chat_id), {})
+        joined = user.get("joined", "Desconocido")
+        msg = (
+            f"📊 *Tu Cuenta*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 *Nombre:* {user.get('first_name', 'N/A')}\n"
+            f"🆔 *Chat ID:* `{chat_id}`\n"
+            f"📅 *Miembro desde:* `{joined[:10] if len(joined) > 10 else joined}`\n"
+            f"✅ *Estado:* Activo\n"
+            f"💳 *Plan:* Free\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Upgrade a VIP para más features_"
+        )
+        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+            [{"text": "💎 Ver Planes", "callback_data": "cmd_vip"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
+
+    elif action == "cmd_info":
+        msg = (
+            "ℹ️ *Info del Bot*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 *Motor:* GradientBoosting v8\n"
+            "🧠 *Entrenado con:* 27 pares\n"
+            "📊 *Datos:* 2010\\-2026 \\(16 años\\)\n"
+            "🎯 *Estrategia:* Fractal Breakout\n"
+            "📈 *Señales:* BUY / SELL / HOLD\n"
+            "⏰ *Frecuencia:* Diaria \\(cierre NY\\)\n"
+            "🔒 *Riesgo:* 0\\.5% por operación\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🏗 *Stack:* Python \\+ Firebase \\+ Railway\n"
+            "📡 *Uptime:* 24/7 en la nube\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "_Desarrollado con Machine Learning_"
+        )
+        tg_send_buttons(chat_id, msg, [
+            [{"text": "📊 Rendimiento OOS", "callback_data": "cmd_performance"}],
+            [{"text": "📜 Ver Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
+
+    elif action == "cmd_performance":
+        report = {}
+        if db:
+            doc = db.collection("reports").document("blind_test_v8").get()
+            if doc.exists:
+                report = doc.to_dict()
+        
+        if not report:
+            tg_send_buttons(chat_id,
+                "📊 *Rendimiento Out-of-Sample*\n━━━━━━━━━━━━━━━━━━━━\n\n_Reporte no generado aún\\._\n\nEjecutá `blind_backtest.py` para generar métricas de ingeniería\\.",
+                [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            return
+        
+        msg = (
+            f"📊 *Reporte de Ingeniería (OOS)*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📅 *Periodo:* 2024 \\- 2026 \\(Ciego\\)\n"
+            f"🔢 *Total Trades:* {report.get('total_trades', 0)}\n"
+            f"✅ *Win Rate:* {report.get('avg_win_rate', 0):.1f}%\n"
+            f"📈 *Profit Factor:* {report.get('avg_profit_factor', 0):.2f}\n"
+            f"🎯 *Esperanza:* {report.get('mathematical_expectancy', 0):.2f} pips/trade\n"
+            f"📉 *Max Drawdown:* {report.get('max_drawdown_avg', 0):.0f} pips\n"
+            f"⚖️ *Ratio Sharpe:* {report.get('avg_sharpe', 0):.2f}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Validación técnica sobre datos nunca vistos_"
+        )
+        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+            [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
+
+    elif action == "cmd_history":
+        trades = []
+        if db:
+            docs = db.collection("backtest_history").order_by("order").limit(10).stream()
+            trades = [doc.to_dict() for doc in docs]
+        
+        if not trades:
+            tg_send_buttons(chat_id,
+                "📜 *Historial de Operaciones*\n━━━━━━━━━━━━━━━━━━━━\n\n_No hay operaciones registradas aún\\._\n\n_El historial se actualiza con cada backtest\\._",
+                [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            return
+        
+        wins = sum(1 for t in trades if t.get("result") == "TP")
+        losses = sum(1 for t in trades if t.get("result") == "SL")
+        total = wins + losses
+        wr = wins / max(1, total) * 100
+        
+        msg = f"📜 *Últimas Operaciones \\(Backtest\\)*\n━━━━━━━━━━━━━━━━━━━━\n"
+        
+        for t in trades[:10]:
+            result = t.get("result", "?")
+            if result == "TP":
+                emoji = "✅"
+            elif result == "SL":
+                emoji = "❌"
+            else:
+                emoji = "⏳"
+            
+            sig = "🟢" if t.get("signal") == "BUY" else "🔴"
+            pair = t.get("pair", "???")
+            entry = str(t.get("entry", "?"))[:8]
+            conf = t.get("confidence", 0)
+            
+            msg += f"{emoji} {sig} *{pair}* → `{entry}` \\({conf*100:.0f}%\\)\n"
+        
+        msg += (
+            f"\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Win Rate:* {wr:.0f}% \\({wins}W / {losses}L\\)\n"
+            f"_Basado en backtest de últimos 6 meses_"
+        )
+        
+        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+            [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
+
+    elif action == "cmd_vip":
+        msg = (
+            "💎 *Planes Premium*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🆓 *FREE*\n"
+            "• 1 señal diaria\n"
+            "• 7 pares principales\n"
+            "• Alertas básicas\n\n"
+            "⭐ *PRO \\— $9\\.99/mes*\n"
+            "• Señales ilimitadas\n"
+            "• 27 pares \\+ Oro\n"
+            "• Alertas SL/TP en vivo\n"
+            "• Historial completo\n\n"
+            "👑 *ELITE \\— $24\\.99/mes*\n"
+            "• Todo de PRO\n"
+            "• Señales intradía \\(1H\\)\n"
+            "• Soporte prioritario\n"
+            "• Acceso a la API\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "_Contactar @admin para upgrade_"
+        )
+        tg_send_buttons(chat_id, msg, [
+            [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
+
+    elif action == "cmd_price":
         tg_send(chat_id, "💰 *Consultando precios actuales\\.\\.\\.*")
         msg = "📊 *Precios en Vivo*\n━━━━━━━━━━━━━━━━━━━━\n"
         for pair, config in PAIRS.items():
@@ -388,12 +589,28 @@ def handle_command(chat_id, text, first_name, username):
                 flag = PAIR_FLAGS.get(pair, "💱")
                 msg += f"{flag} *{pair}:* `{last_price:.{config['decimals']}f}`\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n_Datos vía Yahoo Finance_"
-        tg_send(chat_id, msg.replace(".", "\\."))
+        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+            [{"text": "📈 Activas", "callback_data": "cmd_active"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
 
-    else:
-        tg_send(chat_id,
-                "❓ Comandos disponibles:\n/start \\- Suscribirse\n/stop \\- Desuscribirse\n/status \\- Estado\n/signal \\- Escanear ahora\n/price \\- Precios actuales",
-                )
+    elif action == "cmd_active":
+        active = db_get_active_signals()
+        if not active:
+            tg_send_buttons(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*", [
+                [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+            ])
+            return
+        msg = "📈 *Operaciones en Seguimiento*\n━━━━━━━━━━━━━━━━━━━━\n"
+        for pair, s in active.items():
+            emoji = "🟢 BUY" if s["signal"] == "BUY" else "🔴 SELL"
+            msg += f"*{pair}* — {emoji}\n📍 En: `{s['entry']}`\n🛑 SL: `{s['sl']}` | 🎯 TP: `{s['tp']}`\n\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n_Monitoreando cada 5 min_"
+        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+            [{"text": "💰 Precios", "callback_data": "cmd_price"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
+        ])
+
+    elif action == "cmd_menu":
+        tg_send_buttons(chat_id, "🤖 *Menú Principal*", get_main_buttons())
 
 
 # ─── Main loop (long polling) ──────────────────────────────────────────
@@ -461,6 +678,16 @@ def run_polling():
             updates = tg_get_updates(offset)
             for update in updates:
                 offset = update["update_id"] + 1
+                
+                # Manejar callback queries (botones inline)
+                cb = update.get("callback_query")
+                if cb:
+                    cb_chat_id = cb["message"]["chat"]["id"]
+                    cb_data = cb.get("data", "")
+                    tg_answer_callback(cb["id"])
+                    handle_callback_query_action(cb_chat_id, cb_data)
+                    continue
+                
                 msg = update.get("message")
                 if not msg:
                     continue

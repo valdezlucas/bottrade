@@ -43,6 +43,7 @@ PAIRS = {
     "AUDUSD": {"file": "AUDUSD_daily_2010_2026.csv", "spread": 1.2, "pip": 0.0001},
     "USDCAD": {"file": "USDCAD_daily_2010_2026.csv", "spread": 1.5, "pip": 0.0001},
     "USDCHF": {"file": "USDCHF_daily_2010_2026.csv", "spread": 1.5, "pip": 0.0001},
+    "USDJPY": {"file": "USDJPY_daily_2010_2026.csv", "spread": 1.2, "pip": 0.01, "skip_backtest": True},
     "EURGBP": {"file": "EURGBP_daily_2010_2026.csv", "spread": 1.5, "pip": 0.0001},
     "EURJPY": {"file": "EURJPY_daily_2010_2026.csv", "spread": 1.5, "pip": 0.01, "skip_backtest": True},
     "GBPJPY": {"file": "GBPJPY_daily_2010_2026.csv", "spread": 2.0, "pip": 0.01, "skip_backtest": True},
@@ -57,6 +58,12 @@ PAIRS = {
     "AUDNZD": {"file": "AUDNZD_daily_2010_2026.csv", "spread": 2.5, "pip": 0.0001},
     "EURCAD": {"file": "EURCAD_daily_2010_2026.csv", "spread": 2.5, "pip": 0.0001},
     "GBPCAD": {"file": "GBPCAD_daily_2010_2026.csv", "spread": 3.0, "pip": 0.0001},
+    "EURCHF": {"file": "EURCHF_daily_2010_2026.csv", "spread": 2.0, "pip": 0.0001},
+    "GBPCHF": {"file": "GBPCHF_daily_2010_2026.csv", "spread": 2.5, "pip": 0.0001},
+    "AUDCHF": {"file": "AUDCHF_daily_2010_2026.csv", "spread": 3.0, "pip": 0.0001},
+    "CADCHF": {"file": "CADCHF_daily_2010_2026.csv", "spread": 3.0, "pip": 0.0001},
+    "NZDCHF": {"file": "NZDCHF_daily_2010_2026.csv", "spread": 3.5, "pip": 0.0001},
+    "XAUUSD": {"file": "XAUUSD_daily_2010_2026.csv", "spread": 3.0, "pip": 0.1, "skip_backtest": True},
 }
 
 
