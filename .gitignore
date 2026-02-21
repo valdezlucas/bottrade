@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.csv
+NZDUSD_1h.csv
+trade_journal.csv
+*.log
+
+# Guardar modelos y config
+# model_multi.joblib → SÍ incluir en git (necesario para el bot)
+# telegram_config.json → Railway usa variable de entorno
+telegram_config.json
