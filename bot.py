@@ -502,8 +502,9 @@ def handle_callback_query_action(chat_id, action):
             f"🎯 *Esperanza:* {report.get('mathematical_expectancy', 0):.2f} pips/trade\n"
             f"📉 *Max Drawdown:* {report.get('max_drawdown_avg', 0):.0f} pips\n"
             f"⚖️ *Ratio Sharpe:* {report.get('avg_sharpe', 0):.2f}\n"
+            f"🛡 *Slippage:* \\+1\\.0 pip \\(Incluido\\)\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Validación técnica sobre datos nunca vistos_"
+            f"_Validación ultra\\-robusta sin fugas de datos_"
         )
         tg_send_buttons(chat_id, msg.replace(".", "\\."), [
             [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]

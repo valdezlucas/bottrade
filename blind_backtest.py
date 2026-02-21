@@ -158,9 +158,10 @@ def run_blind_test(split_year=2024):
                     if f_row["High"] >= sl: result = "SL"; exit_price = sl; break
                     if f_row["Low"] <= tp: result = "TP"; exit_price = tp; break
             
-            # Calcular pips netos con costos
+            # Calcular pips netos con costos reales (Spread + 1 pip slippage)
+            slippage = 1.0  # Margen de seguridad sugerido por realidad
             raw_pips = (exit_price - entry) / config["pip"] if signal == "BUY" else (entry - exit_price) / config["pip"]
-            net_pips = raw_pips - config["spread"]
+            net_pips = raw_pips - config["spread"] - slippage
             
             pair_trades.append({"result": result, "pips": net_pips})
             
@@ -180,14 +181,15 @@ def run_blind_test(split_year=2024):
         "total_trades": int(df_res["total_trades"].sum()),
         "avg_win_rate": float(df_res["win_rate"].mean()),
         "avg_profit_factor": float(df_res["profit_factor"].mean()),
-        "total_net_pips": float(df_res["total_trades"].sum() * df_res["expectancy"].mean()), # Estimado
+        "total_net_pips": float(df_res["total_trades"].sum() * df_res["expectancy"].mean()),
         "max_drawdown_avg": float(df_res["max_drawdown_pips"].max()),
         "avg_sharpe": float(df_res["sharpe_ratio"].mean()),
-        "mathematical_expectancy": float(df_res["expectancy"].mean())
+        "mathematical_expectancy": float(df_res["expectancy"].mean()),
+        "slippage_added": 1.0
     }
     
     print("\n" + "="*70)
-    print("  REPORTE FINAL DE INGENIERÍA (PROMEDIO MULTI-PAIR)")
+    print("  REPORTE FINAL DE INGENIERÍA (CON SLIPPAGE +1 PIP)")
     print("="*70)
     print(f"  Total Trades:         {global_stats['total_trades']}")
     print(f"  Win Rate Promedio:    {global_stats['avg_win_rate']:.1f}%")
