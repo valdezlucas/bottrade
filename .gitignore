@@ -11,3 +11,4 @@ trade_journal.csv
 # model_multi.joblib → SÍ incluir en git (necesario para el bot)
 # telegram_config.json → Railway usa variable de entorno
 telegram_config.json
+firebase_key.json

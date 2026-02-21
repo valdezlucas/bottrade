@@ -36,6 +36,10 @@ if sys.platform == "win32":
 
 from features import create_features
 from fractals import detect_fractals
+from firebase_manager import (
+    db_add_subscriber, db_remove_subscriber, db_get_subscribers,
+    db_save_signal, db_get_active_signals, db_close_signal
+)
 
 # ─── CONFIG ────────────────────────────────────────────────────────────
 BOT_TOKEN = "5967657374:AAHX9XuJBmRxIYWn9AgcsCBtTK5mr3O2yTY"
@@ -81,37 +85,9 @@ bot_state = {
 
 
 # ─── Suscriptores ──────────────────────────────────────────────────────
-def load_subscribers():
-    if not os.path.exists(SUBSCRIBERS_FILE):
-        return {}
-    with open(SUBSCRIBERS_FILE) as f:
-        return json.load(f)
+# Eliminamos funciones locales de JSON y usamos las de Firebase
+# ──────────────────────────────────────────────────────────────────────
 
-
-def save_subscribers(subs):
-    with open(SUBSCRIBERS_FILE, "w") as f:
-        json.dump(subs, f, indent=2)
-
-
-def add_subscriber(chat_id, first_name="", username=""):
-    subs = load_subscribers()
-    subs[str(chat_id)] = {
-        "first_name": first_name,
-        "username": username,
-        "joined": datetime.now().isoformat(),
-    }
-    save_subscribers(subs)
-    log.info(f"Nuevo suscriptor: {first_name} ({chat_id})")
-    return len(subs)
-
-
-def remove_subscriber(chat_id):
-    subs = load_subscribers()
-    if str(chat_id) in subs:
-        del subs[str(chat_id)]
-        save_subscribers(subs)
-        return True
-    return False
 
 
 # ─── Telegram API ──────────────────────────────────────────────────────
@@ -131,25 +107,15 @@ def tg_send(chat_id, text, parse_mode="MarkdownV2"):
 
 def tg_broadcast(text, parse_mode="MarkdownV2"):
     """Envía un mensaje a TODOS los suscriptores."""
-    subs = load_subscribers()
+    subs = db_get_subscribers()
     ok_count = 0
-    fail_ids = []
 
     for chat_id in subs:
         if tg_send(int(chat_id), text, parse_mode):
             ok_count += 1
-        else:
-            fail_ids.append(chat_id)
-        time.sleep(0.05)  # Rate limit: Telegram permite ~30 msg/seg
+        time.sleep(0.05)
 
-    # Eliminar suscriptores que bloquearon el bot
-    if fail_ids:
-        subs = load_subscribers()
-        for cid in fail_ids:
-            subs.pop(cid, None)
-        save_subscribers(subs)
-
-    log.info(f"Broadcast enviado: {ok_count}/{len(subs)+len(fail_ids)} OK")
+    log.info(f"Broadcast enviado: {ok_count}/{len(subs)} OK")
     return ok_count
 
 
@@ -323,7 +289,7 @@ def build_signal_message(s):
 
 def scan_and_broadcast():
     """Escanea y transmite señales a todos los suscriptores."""
-    subs = load_subscribers()
+    subs = db_get_subscribers()
     n_subs = len(subs)
     log.info(f"Iniciando scan + broadcast ({n_subs} suscriptores)")
 
@@ -331,11 +297,12 @@ def scan_and_broadcast():
 
     if not signals:
         log.info("Sin señales — no se envía broadcast")
-        # Opcional: armar comentado para no spamear
-        # tg_broadcast("⏸ *Sin señales hoy*\\. Próximo scan mañana\\.")
         return
 
     for s in signals:
+        # Guardar en Firebase para monitoreo
+        db_save_signal(s["pair"], s)
+        
         msg = build_signal_message(s)
         sent = tg_broadcast(msg)
         log.info(f"Señal {s['pair']} {s['signal']} enviada a {sent} suscriptores")
@@ -347,7 +314,8 @@ def handle_command(chat_id, text, first_name, username):
     cmd = text.strip().lower().split()[0] if text else ""
 
     if cmd in ["/start", "start"]:
-        n = add_subscriber(chat_id, first_name, username)
+        db_add_subscriber(chat_id, first_name, username)
+        n = len(db_get_subscribers())
         msg = (
             f"✅ *¡Bienvenido\\, {first_name}\\!*\n\n"
             f"Ahora recibirás señales de trading en tiempo real\\.\n\n"
@@ -364,16 +332,13 @@ def handle_command(chat_id, text, first_name, username):
         log.info(f"/start de {first_name} ({chat_id})")
 
     elif cmd in ["/stop", "stop"]:
-        removed = remove_subscriber(chat_id)
-        if removed:
-            tg_send(chat_id,
-                    "👋 *Desuscripto\\.*\n\nYa no recibirás más señales\\.\nUsá /start para volver\\.",
-                    )
-        else:
-            tg_send(chat_id, "No estabas suscripto\\. Usá /start para suscribirte\\.")
+        db_remove_subscriber(chat_id)
+        tg_send(chat_id,
+                "👋 *Desuscripto\\.*\n\nYa no recibirás más señales\\.\nUsá /start para volver\\.",
+                )
 
     elif cmd in ["/status", "status"]:
-        subs = load_subscribers()
+        subs = db_get_subscribers()
         last = bot_state.get("last_scan") or "Nunca"
         n_signals = len(bot_state.get("last_signals", []))
         total = bot_state.get("total_scans", 0)
@@ -400,6 +365,19 @@ def handle_command(chat_id, text, first_name, username):
             tg_send(chat_id,
                     "⏸ *Sin señales ahora*\\.\n\nEl modelo está en HOLD para todos los pares\\.")
 
+    elif cmd in ["/active", "active"]:
+        active = db_get_active_signals()
+        if not active:
+            tg_send(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*")
+            return
+            
+        msg = "📈 *Operaciones en Seguimiento*\n━━━━━━━━━━━━━━━━━━━━\n"
+        for pair, s in active.items():
+            emoji = "🟢 BUY" if s["signal"] == "BUY" else "🔴 SELL"
+            msg += f"*{pair}* — {emoji}\n📍 En: `{s['entry']}`\n🛑 SL: `{s['sl']}` | 🎯 TP: `{s['tp']}`\n\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n_Monitoreando cada 5 min_"
+        tg_send(chat_id, msg.replace(".", "\\."))
+
     elif cmd in ["/price", "price"]:
         tg_send(chat_id, "💰 *Consultando precios actuales\\.\\.\\.*")
         msg = "📊 *Precios en Vivo*\n━━━━━━━━━━━━━━━━━━━━\n"
@@ -419,6 +397,60 @@ def handle_command(chat_id, text, first_name, username):
 
 
 # ─── Main loop (long polling) ──────────────────────────────────────────
+# ─── Monitor Loop ──────────────────────────────────────────────────────
+def run_monitor_loop():
+    """
+    Rastrea señales activas contra precios en vivo.
+    Si toca SL o TP, avisa a todos y cierra la señal en DB.
+    """
+    log.info("Iniciado hilo de monitoreo de señales...")
+    while True:
+        try:
+            active = db_get_active_signals()
+            if not active:
+                time.sleep(300)
+                continue
+                
+            for pair, s in active.items():
+                config = PAIRS.get(pair)
+                if not config: continue
+                
+                df = download_data(config["ticker"], days=3)
+                if df is None or df.empty: continue
+                
+                curr = df.iloc[-1]["Close"]
+                high = df.iloc[-1]["High"]
+                low = df.iloc[-1]["Low"]
+                
+                hit = None
+                if s["signal"] == "BUY":
+                    if high >= s["tp"]: hit = "TP"
+                    elif low <= s["sl"]: hit = "SL"
+                else: # SELL
+                    if low <= s["tp"]: hit = "TP"
+                    elif high >= s["sl"]: hit = "SL"
+                
+                if hit:
+                    # Notificar cierre
+                    emoji = "🎯 TP" if hit == "TP" else "🛑 SL"
+                    flag = PAIR_FLAGS.get(pair, "💱")
+                    msg = (
+                        f"🏁 *OPERACIÓN CERRADA* — {pair}\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"{flag} *Cierre:* {emoji}\n"
+                        f"📍 *Entrada:* `{str(s['entry']).replace('.', '\\.')}`\n"
+                        f"🏁 *Salida:*  `{str(curr).replace('.', '\\.')}`\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
+                        f"{'✅ PROFIT' if hit == 'TP' else '❌ LOSS'}\n"
+                    )
+                    tg_broadcast(msg)
+                    db_close_signal(pair, hit, curr)
+            
+            time.sleep(300) # Revisa cada 5 min
+        except Exception as e:
+            log.error(f"Error en monitor loop: {e}")
+            time.sleep(60)
+
 def run_polling():
     """Loop principal: escucha mensajes de Telegram con long polling."""
     log.info("Bot iniciado — escuchando mensajes...")
@@ -465,9 +497,13 @@ if __name__ == "__main__":
     if args.scan_now:
         scan_and_broadcast()
     else:
-        # Correr polling + scheduler en paralelo
+        # 1. Scheduler (Signals)
         t_scheduler = threading.Thread(target=run_scheduler, daemon=True)
         t_scheduler.start()
 
-        # Polling en main thread
+        # 2. Monitor (SL/TP)
+        t_monitor = threading.Thread(target=run_monitor_loop, daemon=True)
+        t_monitor.start()
+
+        # 3. Polling (Commands)
         run_polling()
