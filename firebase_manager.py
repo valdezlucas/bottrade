@@ -22,7 +22,20 @@ log = logging.getLogger(__name__)
 # Inicializar Firebase
 try:
     if not firebase_admin._apps:
-        cred = credentials.Certificate("firebase_key.json")
+        # 1. Intentar desde variable de entorno (para Railway)
+        json_key = os.environ.get("FIREBASE_KEY")
+        if json_key:
+            import json
+            service_account_info = json.loads(json_key)
+            cred = credentials.Certificate(service_account_info)
+            log.info("🔍 Cargando Firebase desde variable de entorno FIREBASE_KEY")
+        # 2. Intentar desde archivo local
+        elif os.path.exists("firebase_key.json"):
+            cred = credentials.Certificate("firebase_key.json")
+            log.info("🔍 Cargando Firebase desde archivo firebase_key.json")
+        else:
+            raise FileNotFoundError("No se encontró FIREBASE_KEY ni firebase_key.json")
+
         firebase_admin.initialize_app(cred)
     db = firestore.client()
     log.info("🔥 Firebase conectado correctamente")
