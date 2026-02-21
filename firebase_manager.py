@@ -13,6 +13,7 @@ Configuración:
 """
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 import os
 import logging
 from datetime import datetime
@@ -83,7 +84,7 @@ def db_add_subscriber(chat_id, first_name="", username=""):
 
 def db_get_subscribers():
     if not db: return {}
-    docs = db.collection("subscribers").where("active", "==", True).stream()
+    docs = db.collection("subscribers").where(filter=FieldFilter("active", "==", True)).stream()
     return {doc.id: doc.to_dict() for doc in docs}
 
 def db_remove_subscriber(chat_id):
@@ -106,7 +107,7 @@ def db_save_signal(pair, signal_data):
 def db_get_active_signals():
     """Retorna todas las señales en estado OPEN."""
     if not db: return {}
-    docs = db.collection("active_signals").where("status", "==", "OPEN").stream()
+    docs = db.collection("active_signals").where(filter=FieldFilter("status", "==", "OPEN")).stream()
     return {doc.id: doc.to_dict() for doc in docs}
 
 def db_close_signal(pair, result, exit_price):
