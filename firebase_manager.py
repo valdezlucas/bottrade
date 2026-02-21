@@ -26,7 +26,7 @@ try:
         json_key = os.environ.get("FIREBASE_KEY")
         if json_key:
             import json
-            service_account_info = json.loads(json_key)
+            service_account_info = json.loads(json_key.strip())
             cred = credentials.Certificate(service_account_info)
             log.info("🔍 Cargando Firebase desde variable de entorno FIREBASE_KEY")
         # 2. Intentar desde archivo local
