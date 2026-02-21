@@ -401,16 +401,16 @@ def handle_command(chat_id, text, first_name, username):
     cmd = raw.lower().split()[0] if raw else ""
 
     # ─── Botones del teclado (Reply Keyboard) ──────────────────────
-    if raw == "💼 Cuenta":
+    if "Cuenta" in raw:
         handle_action(chat_id, "cmd_cuenta")
         return
-    elif raw == "💰 Depositar":
+    elif "Depositar" in raw:
         handle_action(chat_id, "cmd_depositar")
         return
-    elif raw == "ℹ️ Info":
+    elif "Info" in raw and raw.startswith("ℹ"):
         handle_action(chat_id, "cmd_info")
         return
-    elif raw == "📊 Alertas":
+    elif "Alertas" in raw:
         handle_action(chat_id, "cmd_history")
         return
 
@@ -462,8 +462,7 @@ def handle_action(chat_id, action):
     if action == "cmd_cuenta":
         user = db_get_user_account(chat_id)
         if not user:
-            tg_send_inline(chat_id, "⚠️ *Primero usá /start para crear tu cuenta\\\\.*",
-                [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            tg_send(chat_id, "⚠️ Usá /start primero para crear tu cuenta\\.")
             return
         
         joined = user.get("joined", "Desconocido")
@@ -516,13 +515,56 @@ def handle_action(chat_id, action):
                 [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
 
     elif action == "cmd_depositar":
-        awaiting_deposit[chat_id] = True
         tg_send_inline(chat_id,
             "💰 *Depositar Saldo*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Enviá el monto que querés depositar\\.\n"
-            "Ejemplo: `10` para cargar $10 USD\\.\n\n"
-            "_Respondé con un número para confirmar\\._",
+            "Elegí tu método de pago:\n\n"
+            "🟡 *PayPal* \u2014 Instantáneo\n"
+            "🟢 *Cripto USDT \\(TRC20\\)* \u2014 Sin comisión\n"
+            "🔵 *Transferencia Bancaria* \u2014 1\\-2 días\n\n"
+            "_Cada señal cuesta $0\\.50 USD_",
+            [
+                [{"text": "🟡 PayPal", "callback_data": "dep_paypal"}],
+                [{"text": "🟢 Cripto USDT (TRC20)", "callback_data": "dep_crypto"}],
+                [{"text": "🔵 Transferencia Bancaria", "callback_data": "dep_bank"}],
+                [{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}],
+            ])
+
+    elif action == "dep_paypal":
+        awaiting_deposit[chat_id] = "paypal"
+        tg_send_inline(chat_id,
+            "🟡 *Depósito vía PayPal*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Enviá tu pago a:\n"
+            "📧 `pagos@tradingbot\\.com`\n\n"
+            "Luego respondé con el *monto* enviado\n"
+            "Ejemplo: `10`\n\n"
+            "_Tu saldo se actualiza al instante\\._",
+            [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
+
+    elif action == "dep_crypto":
+        awaiting_deposit[chat_id] = "crypto"
+        tg_send_inline(chat_id,
+            "🟢 *Depósito vía Cripto*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Enviá USDT \\(Red TRC20\\) a:\n"
+            "📎 `TXyz1234567890abcdef`\n\n"
+            "Luego respondé con el *monto* enviado\n"
+            "Ejemplo: `25`\n\n"
+            "_Sin comisión \\| Confirmación en 2 min\\._",
+            [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
+
+    elif action == "dep_bank":
+        awaiting_deposit[chat_id] = "bank"
+        tg_send_inline(chat_id,
+            "🔵 *Depósito vía Transferencia*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🏦 *Banco:* Ejemplo Bank\n"
+            "🔢 *CBU:* `0000003100012345678901`\n"
+            "👤 *Titular:* Trading Bot SRL\n\n"
+            "Luego respondé con el *monto* transferido\n"
+            "Ejemplo: `50`\n\n"
+            "_Acreditación en 1\\-2 días hábiles\\._",
             [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
 
     elif action == "cmd_cancel_deposit":
