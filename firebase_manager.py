@@ -43,6 +43,11 @@ try:
                 log.error(f"   Primeros 20 chars: {clean_key[:20]}...")
                 log.error(f"   Últimos 20 chars: ...{clean_key[-20:]}")
                 raise je
+        # 2. Intentar desde archivo local
+        elif os.path.exists("firebase_key.json"):
+            cred = credentials.Certificate("firebase_key.json")
+            log.info("🔍 Cargando Firebase desde archivo firebase_key.json")
+            
         else:
             env_keys = list(os.environ.keys())
             log.error(f"❌ FIREBASE_KEY no encontrada en el entorno. Variables disponibles: {env_keys}")
