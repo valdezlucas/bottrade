@@ -110,8 +110,8 @@ def tg_send(chat_id, text, parse_mode="MarkdownV2"):
         return False
 
 
-def tg_send_buttons(chat_id, text, buttons, parse_mode="MarkdownV2"):
-    """Envía un mensaje con botones inline."""
+def tg_send_inline(chat_id, text, buttons, parse_mode="MarkdownV2"):
+    """Envía un mensaje con botones inline (dentro del mensaje)."""
     keyboard = {"inline_keyboard": buttons}
     try:
         r = requests.post(
@@ -126,7 +126,31 @@ def tg_send_buttons(chat_id, text, buttons, parse_mode="MarkdownV2"):
         )
         return r.json().get("ok", False)
     except Exception as e:
-        log.error(f"Error enviando botones a {chat_id}: {e}")
+        log.error(f"Error enviando inline a {chat_id}: {e}")
+        return False
+
+
+def tg_send_keyboard(chat_id, text, parse_mode="MarkdownV2"):
+    """Envía un mensaje y muestra el teclado principal en la parte inferior."""
+    keyboard = {
+        "keyboard": get_main_keyboard(),
+        "resize_keyboard": True,
+        "is_persistent": True,
+    }
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "reply_markup": keyboard,
+            },
+            timeout=10,
+        )
+        return r.json().get("ok", False)
+    except Exception as e:
+        log.error(f"Error enviando teclado a {chat_id}: {e}")
         return False
 
 
@@ -142,11 +166,11 @@ def tg_answer_callback(callback_id):
         pass
 
 
-def get_main_buttons():
-    """Retorna la grilla de botones principales."""
+def get_main_keyboard():
+    """Retorna el teclado persistente que aparece abajo (como Storm Trade)."""
     return [
-        [{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "💰 Depositar", "callback_data": "cmd_depositar"}],
-        [{"text": "ℹ️ Información del Bot", "callback_data": "cmd_info"}, {"text": "📊 Últimas Alertas", "callback_data": "cmd_history"}],
+        [{"text": "💼 Cuenta"}, {"text": "💰 Depositar"}],
+        [{"text": "ℹ️ Info"}, {"text": "📊 Alertas"}],
     ]
 
 
@@ -168,7 +192,7 @@ def tg_broadcast_with_billing(text, parse_mode="MarkdownV2"):
         else:
             blocked_count += 1
             if reason == "no_balance":
-                tg_send_buttons(int(chat_id),
+                tg_send_inline(int(chat_id),
                     "⚠️ *Señal detectada pero no enviada*\n\n"
                     "Tu prueba gratuita finalizó y no tenés saldo suficiente\\.\n"
                     f"Cada señal cuesta *$0\\.50 USD*\\.\n\n"
@@ -373,8 +397,24 @@ def scan_and_broadcast():
 # ─── Command handler ───────────────────────────────────────────────────
 def handle_command(chat_id, text, first_name, username):
     """Procesa comandos de Telegram."""
-    cmd = text.strip().lower().split()[0] if text else ""
+    raw = text.strip() if text else ""
+    cmd = raw.lower().split()[0] if raw else ""
 
+    # ─── Botones del teclado (Reply Keyboard) ──────────────────────
+    if raw == "💼 Cuenta":
+        handle_action(chat_id, "cmd_cuenta")
+        return
+    elif raw == "💰 Depositar":
+        handle_action(chat_id, "cmd_depositar")
+        return
+    elif raw == "ℹ️ Info":
+        handle_action(chat_id, "cmd_info")
+        return
+    elif raw == "📊 Alertas":
+        handle_action(chat_id, "cmd_history")
+        return
+
+    # ─── Comandos clásicos ─────────────────────────────────────────
     if cmd in ["/start", "start"]:
         db_init_user_account(chat_id, first_name, username)
         n = len(db_get_subscribers())
@@ -392,78 +432,37 @@ def handle_command(chat_id, text, first_name, username):
             f"Suscriptores activos: *{n}*\n\n"
             f"_Usá los botones de abajo para navegar ⬇️_"
         )
-        tg_send_buttons(chat_id, msg, get_main_buttons())
+        tg_send_keyboard(chat_id, msg)
         log.info(f"/start de {first_name} ({chat_id})")
 
     elif cmd in ["/stop", "stop"]:
         db_remove_subscriber(chat_id)
         tg_send(chat_id,
-                "👋 *Desuscripto\\.*\n\nYa no recibirás más señales\\.\nUsá /start para volver\\.",
-                )
-
-    elif cmd in ["/status", "status"]:
-        subs = db_get_subscribers()
-        last = bot_state.get("last_scan") or "Nunca"
-        n_signals = len(bot_state.get("last_signals", []))
-        total = bot_state.get("total_scans", 0)
-        msg = (
-            f"📊 *Estado del Bot*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👥 Suscriptores: *{len(subs)}*\n"
-            f"🔍 Último scan: `{last}`\n"
-            f"📡 Señales último scan: *{n_signals}*\n"
-            f"🔢 Scans totales: *{total}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Bot corriendo 24/7 en Railway_"
-        )
-        tg_send(chat_id, msg)
+                "👋 *Desuscripto\\.*\n\nYa no recibirás más señales\\.\nUsá /start para volver\\.")
 
     elif cmd in ["/signal", "signal"]:
         tg_send(chat_id, "🔍 *Escaneando mercados\\.\\.\\.*")
-        # Scan solo para quien preguntó
         signals = run_scan()
         if signals:
             for s in signals:
                 tg_send(chat_id, build_signal_message(s))
         else:
-            tg_send(chat_id,
-                    "⏸ *Sin señales ahora*\\.\n\nEl modelo está en HOLD para todos los pares\\.")
-
-    elif cmd in ["/active", "active"]:
-        active = db_get_active_signals()
-        if not active:
-            tg_send(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*")
-            return
-            
-        msg = "📈 *Operaciones en Seguimiento*\n━━━━━━━━━━━━━━━━━━━━\n"
-        for pair, s in active.items():
-            emoji = "🟢 BUY" if s["signal"] == "BUY" else "🔴 SELL"
-            msg += f"*{pair}* — {emoji}\n📍 En: `{s['entry']}`\n🛑 SL: `{s['sl']}` | 🎯 TP: `{s['tp']}`\n\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━\n_Monitoreando cada 5 min_"
-        tg_send(chat_id, msg.replace(".", "\\."))
-
-    elif cmd in ["/price", "price"]:
-        handle_callback_query_action(chat_id, "cmd_price")
-
-    elif cmd in ["/history", "history"]:
-        handle_callback_query_action(chat_id, "cmd_history")
+            tg_send(chat_id, "⏸ *Sin señales ahora*\\.\n\nEl modelo está en HOLD para todos los pares\\.")
 
     elif cmd in ["/menu", "menu"]:
-        tg_send_buttons(chat_id, "🤖 *Menú Principal*", get_main_buttons())
+        tg_send_keyboard(chat_id, "🤖 *Menú Principal*\n\n_Usá los botones de abajo ⬇️_")
 
     else:
-        tg_send_buttons(chat_id,
-                "❓ *Usá los botones o los comandos:*\n/start /stop /status /signal /price /history /menu",
-                get_main_buttons())
+        tg_send_keyboard(chat_id, "❓ *Usá los botones del teclado o /start*")
 
 
-def handle_callback_query_action(chat_id, action):
+def handle_action(chat_id, action):
     """Procesa las acciones de los botones inline."""
 
     if action == "cmd_cuenta":
         user = db_get_user_account(chat_id)
         if not user:
-            tg_send_buttons(chat_id, "⚠️ *Primero usá /start para crear tu cuenta\\\\.*",
+            tg_send_inline(chat_id, "⚠️ *Primero usá /start para crear tu cuenta\\\\.*",
                 [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
             return
         
@@ -499,7 +498,7 @@ def handle_callback_query_action(chat_id, action):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"_Costo por señal: $0\\.50 USD_"
         )
-        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+        tg_send_inline(chat_id, msg.replace(".", "\\."), [
             [{"text": toggle_text, "callback_data": "cmd_toggle_alerts"}],
             [{"text": "💰 Depositar", "callback_data": "cmd_depositar"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
@@ -510,15 +509,15 @@ def handle_callback_query_action(chat_id, action):
             tg_send(chat_id, "⚠️ Error\\. Usá /start primero\\.")
             return
         if new_state:
-            tg_send_buttons(chat_id, "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.",
+            tg_send_inline(chat_id, "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.",
                 [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
         else:
-            tg_send_buttons(chat_id, "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.",
+            tg_send_inline(chat_id, "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.",
                 [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
 
     elif action == "cmd_depositar":
         awaiting_deposit[chat_id] = True
-        tg_send_buttons(chat_id,
+        tg_send_inline(chat_id,
             "💰 *Depositar Saldo*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enviá el monto que querés depositar\\.\n"
@@ -528,7 +527,7 @@ def handle_callback_query_action(chat_id, action):
 
     elif action == "cmd_cancel_deposit":
         awaiting_deposit.pop(chat_id, None)
-        tg_send_buttons(chat_id, "❌ *Depósito cancelado\\.*",
+        tg_send_inline(chat_id, "❌ *Depósito cancelado\\.*",
             [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
 
     elif action == "cmd_info":
@@ -548,7 +547,7 @@ def handle_callback_query_action(chat_id, action):
             "━━━━━━━━━━━━━━━━━━━━\n"
             "_Desarrollado con Machine Learning_"
         )
-        tg_send_buttons(chat_id, msg, [
+        tg_send_inline(chat_id, msg, [
             [{"text": "📊 Rendimiento OOS", "callback_data": "cmd_performance"}],
             [{"text": "📜 Ver Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
@@ -561,7 +560,7 @@ def handle_callback_query_action(chat_id, action):
                 report = doc.to_dict()
         
         if not report:
-            tg_send_buttons(chat_id,
+            tg_send_inline(chat_id,
                 "📊 *Rendimiento Out-of-Sample*\n━━━━━━━━━━━━━━━━━━━━\n\n_Reporte no generado aún\\._\n\nEjecutá `blind_backtest.py` para generar métricas de ingeniería\\.",
                 [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
             return
@@ -580,7 +579,7 @@ def handle_callback_query_action(chat_id, action):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"_Validación ultra\\-robusta sin fugas de datos_"
         )
-        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+        tg_send_inline(chat_id, msg.replace(".", "\\."), [
             [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
 
@@ -591,7 +590,7 @@ def handle_callback_query_action(chat_id, action):
             trades = [doc.to_dict() for doc in docs]
         
         if not trades:
-            tg_send_buttons(chat_id,
+            tg_send_inline(chat_id,
                 "📜 *Historial de Operaciones*\n━━━━━━━━━━━━━━━━━━━━\n\n_No hay operaciones registradas aún\\._\n\n_El historial se actualiza con cada backtest\\._",
                 [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
             return
@@ -625,7 +624,7 @@ def handle_callback_query_action(chat_id, action):
             f"_Basado en backtest de últimos 6 meses_"
         )
         
-        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+        tg_send_inline(chat_id, msg.replace(".", "\\."), [
             [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
 
@@ -650,7 +649,7 @@ def handle_callback_query_action(chat_id, action):
             "━━━━━━━━━━━━━━━━━━━━\n"
             "_Contactar @admin para upgrade_"
         )
-        tg_send_buttons(chat_id, msg, [
+        tg_send_inline(chat_id, msg, [
             [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
 
@@ -664,14 +663,14 @@ def handle_callback_query_action(chat_id, action):
                 flag = PAIR_FLAGS.get(pair, "💱")
                 msg += f"{flag} *{pair}:* `{last_price:.{config['decimals']}f}`\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n_Datos vía Yahoo Finance_"
-        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+        tg_send_inline(chat_id, msg.replace(".", "\\."), [
             [{"text": "📈 Activas", "callback_data": "cmd_active"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
 
     elif action == "cmd_active":
         active = db_get_active_signals()
         if not active:
-            tg_send_buttons(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*", [
+            tg_send_inline(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*", [
                 [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
             ])
             return
@@ -680,12 +679,12 @@ def handle_callback_query_action(chat_id, action):
             emoji = "🟢 BUY" if s["signal"] == "BUY" else "🔴 SELL"
             msg += f"*{pair}* — {emoji}\n📍 En: `{s['entry']}`\n🛑 SL: `{s['sl']}` | 🎯 TP: `{s['tp']}`\n\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n_Monitoreando cada 5 min_"
-        tg_send_buttons(chat_id, msg.replace(".", "\\."), [
+        tg_send_inline(chat_id, msg.replace(".", "\\."), [
             [{"text": "💰 Precios", "callback_data": "cmd_price"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
         ])
 
     elif action == "cmd_menu":
-        tg_send_buttons(chat_id, "🤖 *Menú Principal*", get_main_buttons())
+        tg_send_keyboard(chat_id, "🤖 *Menú Principal*\\n\\n_Usá los botones de abajo ⬇️_")
 
 
 # ─── Main loop (long polling) ──────────────────────────────────────────
@@ -760,7 +759,7 @@ def run_polling():
                     cb_chat_id = cb["message"]["chat"]["id"]
                     cb_data = cb.get("data", "")
                     tg_answer_callback(cb["id"])
-                    handle_callback_query_action(cb_chat_id, cb_data)
+                    handle_action(cb_chat_id, cb_data)
                     continue
                 
                 msg = update.get("message")
@@ -778,7 +777,7 @@ def run_polling():
                         if amount > 0:
                             new_balance = db_deposit(chat_id, amount)
                             if new_balance is not None:
-                                tg_send_buttons(chat_id,
+                                tg_send_inline(chat_id,
                                     f"✅ *Depósito exitoso*\n\n"
                                     f"💵 Monto: *${amount:.2f} USD*\n"
                                     f"💰 Nuevo saldo: *${new_balance:.2f} USD*\n\n"
