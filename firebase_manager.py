@@ -23,7 +23,17 @@ log = logging.getLogger(__name__)
 try:
     if not firebase_admin._apps:
         # 1. Intentar desde variable de entorno (para Railway)
+        # Buscamos 'FIREBASE_KEY' pero también somos robustos a espacios accidentales en el nombre de la variable
         json_key = os.environ.get("FIREBASE_KEY")
+        
+        if not json_key:
+            # Buscar si existe una variable que se parezca (ej: ' FIREBASE_KEY')
+            for k, v in os.environ.items():
+                if k.strip() == "FIREBASE_KEY":
+                    json_key = v
+                    log.info(f"⚠️ Detectada variable con espacio en el nombre: '{k}'")
+                    break
+
         if json_key:
             import json
             import re
