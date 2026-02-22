@@ -45,8 +45,15 @@ from firebase_manager import (
 
 # ─── CONFIG ────────────────────────────────────────────────────────────
 BOT_TOKEN = "5967657374:AAHX9XuJBmRxIYWn9AgcsCBtTK5mr3O2yTY"
-MODEL_PATH = "model_multi.joblib"
-SELL_MODEL_PATH = "model_multi_sell.joblib"
+# Modelos por timeframe
+MODELS = {
+    "1H":    {"buy": "model_1h.joblib",    "sell": "model_1h_sell.joblib"},
+    "4H":    {"buy": "model_4h.joblib",     "sell": "model_4h_sell.joblib"},
+    "Daily": {"buy": "model_multi.joblib",  "sell": "model_multi_sell.joblib"},
+}
+TF_EMOJIS = {"1H": "⏱️", "4H": "⏳", "Daily": "📅"}
+MODEL_PATH = "model_multi.joblib"  # legacy fallback
+SELL_MODEL_PATH = "model_multi_sell.joblib"  # legacy fallback
 SUBSCRIBERS_FILE = "subscribers.json"
 SCAN_HOUR = 22        # Hora en que escanea (22:00 UTC-3 = cierre vela diaria NY)
 RISK_PCT = 0.005      # 0.5% riesgo por trade (para calcular lotes)
@@ -223,14 +230,14 @@ def tg_get_updates(offset=None):
 
 
 # ─── ML Scanner ────────────────────────────────────────────────────────
-def download_data(ticker, days=120):
-    """Descarga datos de Yahoo Finance."""
+def download_data(ticker, days=120, interval="1d"):
+    """Descarga datos de Yahoo Finance para cualquier timeframe."""
     import yfinance as yf
     from datetime import timedelta
     end = datetime.now()
     start = end - timedelta(days=days)
     df = yf.download(ticker, start=start.strftime("%Y-%m-%d"),
-                     end=end.strftime("%Y-%m-%d"), interval="1d", progress=False)
+                     end=end.strftime("%Y-%m-%d"), interval=interval, progress=False)
     if df.empty:
         return None
     if isinstance(df.columns, pd.MultiIndex):
@@ -239,26 +246,62 @@ def download_data(ticker, days=120):
     return df if all(c in df.columns for c in ["Open", "High", "Low", "Close"]) else None
 
 
-def run_scan():
-    """Escanea todos los pares y retorna lista de señales."""
-    log.info("Iniciando scan ML...")
+def resample_to_4h(df_1h):
+    """Resamplea datos 1H a 4H."""
+    if df_1h is None or df_1h.empty:
+        return None
+    df = df_1h.copy()
+    # Si tiene columna datetime, usarla como index
+    for col in ["Datetime", "Date", "index"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col])
+            df = df.set_index(col)
+            break
+    ohlc = {"Open": "first", "High": "max", "Low": "min", "Close": "last"}
+    if "Volume" in df.columns:
+        ohlc["Volume"] = "sum"
+    df_4h = df.resample("4h").agg(ohlc).dropna()
+    return df_4h.reset_index(drop=True)
 
-    if not os.path.exists(MODEL_PATH):
-        log.error(f"Modelo no encontrado: {MODEL_PATH}")
+
+def run_scan(timeframe="Daily"):
+    """Escanea todos los pares para un timeframe específico."""
+    tf_config = MODELS.get(timeframe, MODELS["Daily"])
+    buy_path = tf_config["buy"]
+    sell_path = tf_config["sell"]
+
+    log.info(f"Iniciando scan ML [{timeframe}]...")
+
+    if not os.path.exists(buy_path):
+        log.warning(f"Modelo {timeframe} no encontrado: {buy_path} — skip")
         return []
 
-    model_artifact = joblib.load(MODEL_PATH)
-    sell_artifact = joblib.load(SELL_MODEL_PATH)
+    model_artifact = joblib.load(buy_path)
+    sell_artifact = joblib.load(sell_path)
     feature_cols = model_artifact["feature_columns"]
     threshold = model_artifact["threshold"]
     main_model = model_artifact["model"]
     sell_model = sell_artifact["model"]
 
+    # Configuración de descarga por timeframe
+    if timeframe == "1H":
+        yf_interval, yf_days = "1h", 30
+    elif timeframe == "4H":
+        yf_interval, yf_days = "1h", 30  # descarga 1h y resamplea
+    else:
+        yf_interval, yf_days = "1d", 120
+
     signals = []
 
     for pair, config in PAIRS.items():
-        log.info(f"Escaneando {pair}...")
-        df = download_data(config["ticker"])
+        log.info(f"Escaneando {pair} [{timeframe}]...")
+        df = download_data(config["ticker"], days=yf_days, interval=yf_interval)
+        if df is None or len(df) < 60:
+            continue
+
+        # Para 4H, resamplear de 1H
+        if timeframe == "4H":
+            df = resample_to_4h(df)
         if df is None or len(df) < 60:
             continue
 
@@ -334,6 +377,7 @@ def run_scan():
             "atr_pips": atr / pip,
             "risk_usd": risk_usd,
             "volume": volume,
+            "timeframe": timeframe,
         })
         log.info(f"  {pair}: {signal} ({confidence:.1%})")
 
@@ -348,13 +392,15 @@ def build_signal_message(s):
     """Construye mensaje de señal para Telegram."""
     flag = PAIR_FLAGS.get(s["pair"], "💱")
     emoji = "🟢 BUY" if s["signal"] == "BUY" else "🔴 SELL"
+    tf = s.get("timeframe", "Daily")
+    tf_emoji = TF_EMOJIS.get(tf, "📅")
 
     # Escapar caracteres especiales para MarkdownV2
     def esc(v):
         return str(v).replace(".", "\\.").replace("-", "\\-").replace("+", "\\+")
 
     text = (
-        f"⚡ *SEÑAL ML* — {datetime.now().strftime('%H:%M %d/%m/%Y')}\n\n"
+        f"⚡ *SEÑAL ML* {tf_emoji} *{tf}* — {datetime.now().strftime('%H:%M %d/%m/%Y')}\n\n"
         f"{flag} *{s['pair']}* — {emoji}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📍 *Entry:*    `{esc(s['entry'])}`\n"
@@ -373,25 +419,23 @@ def build_signal_message(s):
     return text
 
 
-def scan_and_broadcast():
+def scan_and_broadcast(timeframe="Daily"):
     """Escanea y transmite señales con sistema de billing."""
     subs = db_get_subscribers()
     n_subs = len(subs)
-    log.info(f"Iniciando scan + broadcast ({n_subs} suscriptores)")
+    log.info(f"Iniciando scan + broadcast [{timeframe}] ({n_subs} suscriptores)")
 
-    signals = run_scan()
+    signals = run_scan(timeframe)
 
     if not signals:
-        log.info("Sin señales — no se envía broadcast")
+        log.info(f"Sin señales [{timeframe}] — no se envía broadcast")
         return
 
     for s in signals:
-        # Guardar en Firebase para monitoreo
         db_save_signal(s["pair"], s)
-        
         msg = build_signal_message(s)
         sent = tg_broadcast_with_billing(msg)
-        log.info(f"Señal {s['pair']} {s['signal']} enviada a {sent} suscriptores")
+        log.info(f"[{timeframe}] {s['pair']} {s['signal']} enviada a {sent} subs")
 
 
 # ─── Command handler ───────────────────────────────────────────────────
@@ -846,10 +890,22 @@ def run_polling():
 
 
 def run_scheduler():
-    """Programa el scan diario."""
+    """Programa scans multi-timeframe."""
     scan_time = f"{SCAN_HOUR:02d}:00"
-    schedule.every().day.at(scan_time).do(scan_and_broadcast)
-    log.info(f"Scan programado diariamente a las {scan_time}")
+
+    # Daily: 1x al día al cierre NY
+    schedule.every().day.at(scan_time).do(scan_and_broadcast, "Daily")
+    log.info(f"📅 Daily scan programado a las {scan_time}")
+
+    # 4H: cada 4 horas (si existe el modelo)
+    if os.path.exists(MODELS["4H"]["buy"]):
+        schedule.every(4).hours.do(scan_and_broadcast, "4H")
+        log.info("⏳ 4H scan programado cada 4 horas")
+
+    # 1H: cada hora (si existe el modelo)
+    if os.path.exists(MODELS["1H"]["buy"]):
+        schedule.every(1).hours.do(scan_and_broadcast, "1H")
+        log.info("⏱️ 1H scan programado cada 1 hora")
 
     while True:
         schedule.run_pending()
