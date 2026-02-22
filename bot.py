@@ -47,11 +47,12 @@ from firebase_manager import (
 BOT_TOKEN = "5967657374:AAHX9XuJBmRxIYWn9AgcsCBtTK5mr3O2yTY"
 # Modelos por timeframe
 MODELS = {
-    "1H":    {"buy": "model_1h.joblib",    "sell": "model_1h_sell.joblib"},
-    "4H":    {"buy": "model_4h.joblib",     "sell": "model_4h_sell.joblib"},
-    "Daily": {"buy": "model_multi.joblib",  "sell": "model_multi_sell.joblib"},
+    "1H":        {"buy": "model_1h.joblib",          "sell": "model_1h_sell.joblib"},
+    "4H":        {"buy": "model_4h.joblib",           "sell": "model_4h_sell.joblib"},
+    "Daily":     {"buy": "model_multi.joblib",        "sell": "model_multi_sell.joblib"},
+    "BTC_Daily": {"buy": "model_btc_daily.joblib",    "sell": "model_btc_daily_sell.joblib"},
 }
-TF_EMOJIS = {"1H": "⏱️", "4H": "⏳", "Daily": "📅"}
+TF_EMOJIS = {"1H": "⏱️", "4H": "⏳", "Daily": "📅", "BTC_Daily": "₿"}
 MODEL_PATH = "model_multi.joblib"  # legacy fallback
 SELL_MODEL_PATH = "model_multi_sell.joblib"  # legacy fallback
 SUBSCRIBERS_FILE = "subscribers.json"
@@ -71,10 +72,15 @@ PAIRS = {
     "EURGBP": {"ticker": "EURGBP=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
 }
 
+# Bitcoin — par separado con modelo propio
+BTC_PAIRS = {
+    "BTCUSD": {"ticker": "BTC-USD", "spread": 30.0, "pip": 1.0, "decimals": 2},
+}
+
 PAIR_FLAGS = {
     "EURUSD": "🇪🇺🇺🇸", "GBPUSD": "🇬🇧🇺🇸", "AUDUSD": "🇦🇺🇺🇸",
     "NZDUSD": "🇳🇿🇺🇸", "USDCAD": "🇺🇸🇨🇦", "USDCHF": "🇺🇸🇨🇭",
-    "EURGBP": "🇪🇺🇬🇧",
+    "EURGBP": "🇪🇺🇬🇧", "BTCUSD": "₿",
 }
 
 logging.basicConfig(
@@ -288,12 +294,17 @@ def run_scan(timeframe="Daily"):
         yf_interval, yf_days = "1h", 30
     elif timeframe == "4H":
         yf_interval, yf_days = "1h", 30  # descarga 1h y resamplea
+    elif timeframe == "BTC_Daily":
+        yf_interval, yf_days = "1d", 120
     else:
         yf_interval, yf_days = "1d", 120
 
     signals = []
 
-    for pair, config in PAIRS.items():
+    # Elegir pares según timeframe
+    scan_pairs = BTC_PAIRS if timeframe == "BTC_Daily" else PAIRS
+
+    for pair, config in scan_pairs.items():
         log.info(f"Escaneando {pair} [{timeframe}]...")
         df = download_data(config["ticker"], days=yf_days, interval=yf_interval)
         if df is None or len(df) < 60:
@@ -906,6 +917,11 @@ def run_scheduler():
     if os.path.exists(MODELS["1H"]["buy"]):
         schedule.every(1).hours.do(scan_and_broadcast, "1H")
         log.info("⏱️ 1H scan programado cada 1 hora")
+
+    # BTC Daily: 1x al día junto con forex daily
+    if os.path.exists(MODELS["BTC_Daily"]["buy"]):
+        schedule.every().day.at(scan_time).do(scan_and_broadcast, "BTC_Daily")
+        log.info("₿ BTC Daily scan programado a las " + scan_time)
 
     while True:
         schedule.run_pending()
