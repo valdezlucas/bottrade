@@ -350,11 +350,9 @@ def train_timeframe(tf_name, lookahead, rr):
 # ─── Main ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-Timeframe Model Trainer")
-    parser.add_argument("--tf", type=str, default="all",
-                        choices=["1h", "4h", "all"],
-                        help="Timeframe a entrenar (default: all)")
-    parser.add_argument("--lookahead-1h", type=int, default=12,
-                        help="Lookahead para 1H (default: 12 barras = 12h)")
+    parser.add_argument("--tf", type=str, default="4h",
+                        choices=["4h"],
+                        help="Timeframe a entrenar (1H eliminado por bajo rendimiento OOS)")
     parser.add_argument("--lookahead-4h", type=int, default=10,
                         help="Lookahead para 4H (default: 10 barras = 40h)")
     parser.add_argument("--rr", type=float, default=1.5,
@@ -362,14 +360,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Lookahead ajustado por timeframe:
-    # 1H: 12 barras = mira 12 horas adelante
     # 4H: 10 barras = mira 40 horas adelante
     # Daily (existente): 20 barras = mira 20 días adelante
+    # 1H: ELIMINADO — resultados inconsistentes en backtest OOS
 
-    if args.tf in ["1h", "all"]:
-        train_timeframe("1h", lookahead=args.lookahead_1h, rr=args.rr)
+    train_timeframe("4h", lookahead=args.lookahead_4h, rr=args.rr)
 
-    if args.tf in ["4h", "all"]:
-        train_timeframe("4h", lookahead=args.lookahead_4h, rr=args.rr)
-
-    print("\n🎉 Entrenamiento multi-timeframe completado!")
+    print("\n🎉 Entrenamiento 4H completado!")

@@ -47,12 +47,11 @@ from firebase_manager import (
 BOT_TOKEN = "5967657374:AAHX9XuJBmRxIYWn9AgcsCBtTK5mr3O2yTY"
 # Modelos por timeframe
 MODELS = {
-    "1H":        {"buy": "model_1h.joblib",          "sell": "model_1h_sell.joblib"},
     "4H":        {"buy": "model_4h.joblib",           "sell": "model_4h_sell.joblib"},
     "Daily":     {"buy": "model_multi.joblib",        "sell": "model_multi_sell.joblib"},
     "BTC_Daily": {"buy": "model_btc_daily.joblib",    "sell": "model_btc_daily_sell.joblib"},
 }
-TF_EMOJIS = {"1H": "⏱️", "4H": "⏳", "Daily": "📅", "BTC_Daily": "₿"}
+TF_EMOJIS = {"4H": "⏳", "Daily": "📅", "BTC_Daily": "₿"}
 MODEL_PATH = "model_multi.joblib"  # legacy fallback
 SELL_MODEL_PATH = "model_multi_sell.joblib"  # legacy fallback
 SUBSCRIBERS_FILE = "subscribers.json"
@@ -290,9 +289,7 @@ def run_scan(timeframe="Daily"):
     sell_model = sell_artifact["model"]
 
     # Configuración de descarga por timeframe
-    if timeframe == "1H":
-        yf_interval, yf_days = "1h", 30
-    elif timeframe == "4H":
+    if timeframe == "4H":
         yf_interval, yf_days = "1h", 30  # descarga 1h y resamplea
     elif timeframe == "BTC_Daily":
         yf_interval, yf_days = "1d", 120
@@ -913,10 +910,7 @@ def run_scheduler():
         schedule.every(4).hours.do(scan_and_broadcast, "4H")
         log.info("⏳ 4H scan programado cada 4 horas")
 
-    # 1H: cada hora (si existe el modelo)
-    if os.path.exists(MODELS["1H"]["buy"]):
-        schedule.every(1).hours.do(scan_and_broadcast, "1H")
-        log.info("⏱️ 1H scan programado cada 1 hora")
+    # 1H: ELIMINADO — resultados inconsistentes en backtest OOS
 
     # BTC Daily: 1x al día junto con forex daily
     if os.path.exists(MODELS["BTC_Daily"]["buy"]):
