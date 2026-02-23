@@ -157,6 +157,8 @@ def run_scan_job():
     extremes = get_binance_extremes()
     print(f"🔥 Encontrados {len(extremes)} pares con > {MIN_VOLATILITY_PCT}% volatilidad y liquidez.")
     
+
+
     for asset in extremes[:15]:
         sym = asset['symbol']
         pct = asset['pct_change']
@@ -218,6 +220,8 @@ def run_scan_job():
                 
         except Exception as e:
             print(f"   ❌ Error ML: {e}")
+            
+
 
 def main():
     print("="*60)

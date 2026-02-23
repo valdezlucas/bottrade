@@ -187,10 +187,11 @@ def tg_answer_callback(callback_id):
 
 
 def get_main_keyboard():
-    """Retorna el teclado persistente que aparece abajo (como Storm Trade)."""
+    """Retorna el teclado persistente que aparece abajo."""
     return [
-        [{"text": "💼 Cuenta"}, {"text": "💰 Depositar"}],
-        [{"text": "ℹ️ Info"}, {"text": "📊 Alertas"}],
+        [{"text": "💼 Cuenta"}, {"text": "💰 Depositar"}, {"text": "📊 Alertas"}],
+        [{"text": "💰 Precios"}, {"text": "📈 Activas"}, {"text": "📜 Historial"}],
+        [{"text": "ℹ️ Info"}, {"text": "📊 Rendimiento"}],
     ]
 
 
@@ -212,12 +213,11 @@ def tg_broadcast_with_billing(text, parse_mode="MarkdownV2"):
         else:
             blocked_count += 1
             if reason == "no_balance":
-                tg_send_inline(int(chat_id),
+                tg_send_keyboard(int(chat_id),
                     "⚠️ *Señal detectada pero no enviada*\n\n"
                     "Tu prueba gratuita finalizó y no tenés saldo suficiente\\.\n"
                     f"Cada señal cuesta *$0\\.50 USD*\\.\n\n"
-                    "_Depositá saldo para seguir recibiendo señales\\._",
-                    [[{"text": "💰 Depositar Ahora", "callback_data": "cmd_depositar"}]])
+                    "_Depositá saldo para seguir recibiendo señales usando el botón 💰 Depositar\\._")
             # Si es "no_alerts" no enviamos nada (el usuario las desactivó)
         time.sleep(0.05)
 
@@ -509,11 +509,23 @@ def handle_command(chat_id, text, first_name, username):
     elif "Depositar" in raw:
         handle_action(chat_id, "cmd_depositar")
         return
-    elif "Info" in raw and raw.startswith("ℹ"):
+    elif "Alertas" in raw:
+        handle_action(chat_id, "cmd_toggle_alerts")
+        return
+    elif "Precios" in raw or cmd == "/price":
+        handle_action(chat_id, "cmd_price")
+        return
+    elif "Activas" in raw:
+        handle_action(chat_id, "cmd_active")
+        return
+    elif "Historial" in raw:
+        handle_action(chat_id, "cmd_history")
+        return
+    elif "Info" in raw:
         handle_action(chat_id, "cmd_info")
         return
-    elif "Alertas" in raw:
-        handle_action(chat_id, "cmd_history")
+    elif "Rendimiento" in raw:
+        handle_action(chat_id, "cmd_performance")
         return
 
     # ─── Comandos clásicos ─────────────────────────────────────────
@@ -597,12 +609,10 @@ def handle_action(chat_id, action):
             f"💸 *Total gastado:* ${total_spent:.2f}\n"
             f"📅 *Miembro desde:* {joined[:10] if len(joined) > 10 else joined}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Costo por señal: $0\\.50 USD_"
+            f"_Costo por señal: $0\\.50 USD_\n"
+            f"_(Usa los botones del teclado para recargar o desactivar alertas)_"
         )
-        tg_send_inline(chat_id, msg.replace(".", "\\."), [
-            [{"text": toggle_text, "callback_data": "cmd_toggle_alerts"}],
-            [{"text": "💰 Depositar", "callback_data": "cmd_depositar"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_toggle_alerts":
         new_state = db_toggle_alerts(chat_id)
@@ -610,69 +620,61 @@ def handle_action(chat_id, action):
             tg_send(chat_id, "⚠️ Error\\. Usá /start primero\\.")
             return
         if new_state:
-            tg_send_inline(chat_id, "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.",
-                [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            tg_send_keyboard(chat_id, "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.")
         else:
-            tg_send_inline(chat_id, "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.",
-                [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            tg_send_keyboard(chat_id, "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.")
 
     elif action == "cmd_depositar":
-        tg_send_inline(chat_id,
+        tg_send_keyboard(chat_id,
             "💰 *Depositar Saldo*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Elegí tu método de pago:\n\n"
-            "🟡 *PayPal* \u2014 Instantáneo\n"
-            "🟢 *Cripto USDT \\(TRC20\\)* \u2014 Sin comisión\n"
-            "🔵 *Transferencia Bancaria* \u2014 1\\-2 días\n\n"
-            "_Cada señal cuesta $0\\.50 USD_",
-            [
-                [{"text": "🟡 PayPal", "callback_data": "dep_paypal"}],
-                [{"text": "🟢 Cripto USDT (TRC20)", "callback_data": "dep_crypto"}],
-                [{"text": "🔵 Transferencia Bancaria", "callback_data": "dep_bank"}],
-                [{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}],
-            ])
+            "Elegí tu método de pago y avisa al @admin:\n\n"
+            "🟡 *PayPal* \u2014 Instantáneo (pagos@tradingbot.com)\n"
+            "🟢 *Cripto USDT \\(TRC20\\)* \u2014 TXyz1234567890abcdef\n"
+            "🔵 *Transferencia Bancaria* \u2014 CBU: 0000003100012345678901\n\n"
+            "_Cada señal cuesta $0\\.50 USD_")
 
     elif action == "dep_paypal":
         awaiting_deposit[chat_id] = "paypal"
-        tg_send_inline(chat_id,
+        awaiting_deposit[chat_id] = "paypal"
+        tg_send_keyboard(chat_id,
             "🟡 *Depósito vía PayPal*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enviá tu pago a:\n"
             "📧 `pagos@tradingbot\\.com`\n\n"
-            "Luego respondé con el *monto* enviado\n"
+            "Luego envía un mensaje con el *monto* enviado\n"
             "Ejemplo: `10`\n\n"
-            "_Tu saldo se actualiza al instante\\._",
-            [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
+            "_Tu saldo se actualiza al instante\\._")
 
     elif action == "dep_crypto":
         awaiting_deposit[chat_id] = "crypto"
-        tg_send_inline(chat_id,
+        awaiting_deposit[chat_id] = "crypto"
+        tg_send_keyboard(chat_id,
             "🟢 *Depósito vía Cripto*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enviá USDT \\(Red TRC20\\) a:\n"
             "📎 `TXyz1234567890abcdef`\n\n"
-            "Luego respondé con el *monto* enviado\n"
+            "Luego envía un mensaje con el *monto* enviado\n"
             "Ejemplo: `25`\n\n"
-            "_Sin comisión \\| Confirmación en 2 min\\._",
-            [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
+            "_Sin comisión \\| Confirmación en 2 min\\._")
 
     elif action == "dep_bank":
         awaiting_deposit[chat_id] = "bank"
-        tg_send_inline(chat_id,
+        awaiting_deposit[chat_id] = "bank"
+        tg_send_keyboard(chat_id,
             "🔵 *Depósito vía Transferencia*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🏦 *Banco:* Ejemplo Bank\n"
             "🔢 *CBU:* `0000003100012345678901`\n"
             "👤 *Titular:* Trading Bot SRL\n\n"
-            "Luego respondé con el *monto* transferido\n"
+            "Luego envía un mensaje con el *monto* transferido\n"
             "Ejemplo: `50`\n\n"
-            "_Acreditación en 1\\-2 días hábiles\\._",
-            [[{"text": "❌ Cancelar", "callback_data": "cmd_cancel_deposit"}]])
+            "_Acreditación en 1\\-2 días hábiles\\._")
 
     elif action == "cmd_cancel_deposit":
         awaiting_deposit.pop(chat_id, None)
-        tg_send_inline(chat_id, "❌ *Depósito cancelado\\.*",
-            [[{"text": "💼 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+        awaiting_deposit.pop(chat_id, None)
+        tg_send_keyboard(chat_id, "❌ *Depósito cancelado\\.*")
 
     elif action == "cmd_info":
         msg = (
@@ -691,10 +693,7 @@ def handle_action(chat_id, action):
             "━━━━━━━━━━━━━━━━━━━━\n"
             "_Desarrollado con Machine Learning_"
         )
-        tg_send_inline(chat_id, msg, [
-            [{"text": "📊 Rendimiento OOS", "callback_data": "cmd_performance"}],
-            [{"text": "📜 Ver Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg)
 
     elif action == "cmd_performance":
         report = {}
@@ -704,9 +703,8 @@ def handle_action(chat_id, action):
                 report = doc.to_dict()
         
         if not report:
-            tg_send_inline(chat_id,
-                "📊 *Rendimiento Out-of-Sample*\n━━━━━━━━━━━━━━━━━━━━\n\n_Reporte no generado aún\\._\n\nEjecutá `blind_backtest.py` para generar métricas de ingeniería\\.",
-                [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            tg_send_keyboard(chat_id,
+                "📊 *Rendimiento Out-of-Sample*\n━━━━━━━━━━━━━━━━━━━━\n\n_Reporte no generado aún\\._\n\nEjecutá `blind_backtest.py` para generar métricas de ingeniería\\.")
             return
         
         msg = (
@@ -723,9 +721,7 @@ def handle_action(chat_id, action):
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"_Validación ultra\\-robusta sin fugas de datos_"
         )
-        tg_send_inline(chat_id, msg.replace(".", "\\."), [
-            [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_history":
         trades = []
@@ -734,9 +730,8 @@ def handle_action(chat_id, action):
             trades = [doc.to_dict() for doc in docs]
         
         if not trades:
-            tg_send_inline(chat_id,
-                "📜 *Historial de Operaciones*\n━━━━━━━━━━━━━━━━━━━━\n\n_No hay operaciones registradas aún\\._\n\n_El historial se actualiza con cada backtest\\._",
-                [[{"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+            tg_send_keyboard(chat_id,
+                "📜 *Historial de Operaciones*\n━━━━━━━━━━━━━━━━━━━━\n\n_No hay operaciones registradas aún\\._\n\n_El historial se actualiza con cada backtest\\._")
             return
         
         wins = sum(1 for t in trades if t.get("result") == "TP")
@@ -768,9 +763,7 @@ def handle_action(chat_id, action):
             f"_Basado en backtest de últimos 6 meses_"
         )
         
-        tg_send_inline(chat_id, msg.replace(".", "\\."), [
-            [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_vip":
         msg = (
@@ -793,39 +786,36 @@ def handle_action(chat_id, action):
             "━━━━━━━━━━━━━━━━━━━━\n"
             "_Contactar @admin para upgrade_"
         )
-        tg_send_inline(chat_id, msg, [
-            [{"text": "📊 Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg)
 
     elif action == "cmd_price":
         tg_send(chat_id, "💰 *Consultando precios actuales\\.\\.\\.*")
         msg = "📊 *Precios en Vivo*\n━━━━━━━━━━━━━━━━━━━━\n"
         for pair, config in PAIRS.items():
-            df = download_data(config["ticker"], days=5)
-            if df is not None and not df.empty:
-                last_price = df.iloc[-1]["Close"]
-                flag = PAIR_FLAGS.get(pair, "💱")
-                msg += f"{flag} *{pair}:* `{last_price:.{config['decimals']}f}`\n"
+            try:
+                import yfinance as yf
+                # Bajar datos de 1 minuto del día actual para precio en vivo
+                df = yf.download(config["ticker"], period="1d", interval="1m", progress=False)
+                if df is not None and not df.empty:
+                    last_price = df.iloc[-1]["Close"]
+                    flag = PAIR_FLAGS.get(pair, "💱")
+                    msg += f"{flag} *{pair}:* `{float(last_price):.{config['decimals']}f}`\n"
+            except Exception as e:
+                log.error(f"Error price {pair}: {e}")
         msg += "━━━━━━━━━━━━━━━━━━━━\n_Datos vía Yahoo Finance_"
-        tg_send_inline(chat_id, msg.replace(".", "\\."), [
-            [{"text": "📈 Activas", "callback_data": "cmd_active"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_active":
         active = db_get_active_signals()
         if not active:
-            tg_send_inline(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*", [
-                [{"text": "📜 Historial", "callback_data": "cmd_history"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-            ])
+            tg_send_keyboard(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*")
             return
         msg = "📈 *Operaciones en Seguimiento*\n━━━━━━━━━━━━━━━━━━━━\n"
         for pair, s in active.items():
             emoji = "🟢 BUY" if s["signal"] == "BUY" else "🔴 SELL"
             msg += f"*{pair}* — {emoji}\n📍 En: `{s['entry']}`\n🛑 SL: `{s['sl']}` | 🎯 TP: `{s['tp']}`\n\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n_Monitoreando cada 5 min_"
-        tg_send_inline(chat_id, msg.replace(".", "\\."), [
-            [{"text": "💰 Precios", "callback_data": "cmd_price"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]
-        ])
+        tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_menu":
         tg_send_keyboard(chat_id, "🤖 *Menú Principal*\\n\\n_Usá los botones de abajo ⬇️_")
@@ -921,12 +911,11 @@ def run_polling():
                         if amount > 0:
                             new_balance = db_deposit(chat_id, amount)
                             if new_balance is not None:
-                                tg_send_inline(chat_id,
+                                tg_send_keyboard(chat_id,
                                     f"✅ *Depósito exitoso*\n\n"
                                     f"💵 Monto: *${amount:.2f} USD*\n"
                                     f"💰 Nuevo saldo: *${new_balance:.2f} USD*\n\n"
-                                    f"_Tenés para {int(new_balance / SIGNAL_COST)} señales\\._".replace(".", "\\."),
-                                    [[{"text": "💼 Ver Cuenta", "callback_data": "cmd_cuenta"}, {"text": "🔙 Menú", "callback_data": "cmd_menu"}]])
+                                    f"_Tenés para {int(new_balance / SIGNAL_COST)} señales\\._".replace(".", "\\."))
                             else:
                                 tg_send(chat_id, "❌ Error al depositar\\. Intentá de nuevo\\.")
                             awaiting_deposit.pop(chat_id, None)
