@@ -191,6 +191,7 @@ def get_main_keyboard():
     return [
         [{"text": "💼 Cuenta"}, {"text": "💰 Depositar"}, {"text": "📊 Alertas"}],
         [{"text": "💰 Precios"}, {"text": "📈 Activas"}, {"text": "📜 Historial"}],
+        [{"text": "🔍 Forex AI"}, {"text": "🔍 Cripto AI"}],
         [{"text": "ℹ️ Info"}, {"text": "📊 Rendimiento"}],
     ]
 
@@ -527,6 +528,12 @@ def handle_command(chat_id, text, first_name, username):
     elif "Rendimiento" in raw:
         handle_action(chat_id, "cmd_performance")
         return
+    elif "Forex AI" in raw:
+        handle_action(chat_id, "cmd_scan_forex")
+        return
+    elif "Cripto AI" in raw:
+        handle_action(chat_id, "cmd_scan_crypto")
+        return
 
     # ─── Comandos clásicos ─────────────────────────────────────────
     if cmd in ["/start", "start"]:
@@ -797,7 +804,10 @@ def handle_action(chat_id, action):
                 # Bajar datos de 1 minuto del día actual para precio en vivo
                 df = yf.download(config["ticker"], period="1d", interval="1m", progress=False)
                 if df is not None and not df.empty:
-                    last_price = df.iloc[-1]["Close"]
+                    last_price = df["Close"].iloc[-1]
+                    import pandas as pd
+                    if isinstance(last_price, pd.Series):
+                        last_price = last_price.iloc[0]
                     flag = PAIR_FLAGS.get(pair, "💱")
                     msg += f"{flag} *{pair}:* `{float(last_price):.{config['decimals']}f}`\n"
             except Exception as e:
@@ -816,6 +826,25 @@ def handle_action(chat_id, action):
             msg += f"*{pair}* — {emoji}\n📍 En: `{s['entry']}`\n🛑 SL: `{s['sl']}` | 🎯 TP: `{s['tp']}`\n\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n_Monitoreando cada 5 min_"
         tg_send_keyboard(chat_id, msg.replace(".", "\\."))
+
+    elif action == "cmd_scan_forex":
+        tg_send_keyboard(chat_id, "🔍 *Escaneando mercado Forex con IA\\.\\.\\.*")
+        signals = run_scan(timeframe="Manual")
+        if signals:
+            for s in signals:
+                tg_send(chat_id, build_signal_message(s))
+            tg_send_keyboard(chat_id, f"✅ *Escaneo finalizado\\.* {len(signals)} señales encontradas\\.")
+        else:
+            tg_send_keyboard(chat_id, "⏸ *Sin señales en este momento*\\.\n\nEl modelo está en HOLD para todos los pares\\.")
+
+    elif action == "cmd_scan_crypto":
+        tg_send_keyboard(chat_id, "🔍 *Escaneando mercado Cripto \\(Pump & Dump\\) con IA\\.\\.\\.*")
+        try:
+            import bot_shitcoins
+            bot_shitcoins.run_scan_job()
+            tg_send_keyboard(chat_id, "✅ *Escaneo Cripto finalizado\\.* Si hubo señales, fueron enviadas\\.")
+        except Exception as e:
+            tg_send_keyboard(chat_id, f"❌ *Error en scanner:* `{str(e)}`".replace(".", "\\."))
 
     elif action == "cmd_menu":
         tg_send_keyboard(chat_id, "🤖 *Menú Principal*\\n\\n_Usá los botones de abajo ⬇️_")
