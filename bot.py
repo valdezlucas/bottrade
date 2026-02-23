@@ -47,28 +47,35 @@ from firebase_manager import (
 BOT_TOKEN = "5967657374:AAHX9XuJBmRxIYWn9AgcsCBtTK5mr3O2yTY"
 # Modelos por timeframe
 MODELS = {
-    "4H":        {"buy": "model_4h.joblib",           "sell": "model_4h_sell.joblib"},
-    "Daily":     {"buy": "model_multi.joblib",        "sell": "model_multi_sell.joblib"},
-    "BTC_Daily": {"buy": "model_btc_daily.joblib",    "sell": "model_btc_daily_sell.joblib"},
+    "4H":        "model_4h.joblib",
+    "Daily":     "model_multi.joblib",
+    "BTC_Daily": "model_btc_daily.joblib",
 }
 TF_EMOJIS = {"4H": "⏳", "Daily": "📅", "BTC_Daily": "₿"}
 MODEL_PATH = "model_multi.joblib"  # legacy fallback
-SELL_MODEL_PATH = "model_multi_sell.joblib"  # legacy fallback
 SUBSCRIBERS_FILE = "subscribers.json"
 SCAN_HOUR = 22        # Hora en que escanea (22:00 UTC-3 = cierre vela diaria NY)
 RISK_PCT = 0.005      # 0.5% riesgo por trade (para calcular lotes)
 DEFAULT_BALANCE = 10000  # Balance de referencia para calcular lotes
 # ──────────────────────────────────────────────────────────────────────
 
-# Pares a escanear
+# Pares a escanear (Solo los que pasaron validación OOS 2022-2026)
 PAIRS = {
-    "EURUSD": {"ticker": "EURUSD=X", "spread": 1.0, "pip": 0.0001, "decimals": 5},
+    # Forex Robusto (PF > 1.3)
     "GBPUSD": {"ticker": "GBPUSD=X", "spread": 1.2, "pip": 0.0001, "decimals": 5},
     "NZDUSD": {"ticker": "NZDUSD=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
     "AUDUSD": {"ticker": "AUDUSD=X", "spread": 1.2, "pip": 0.0001, "decimals": 5},
     "USDCAD": {"ticker": "USDCAD=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
     "USDCHF": {"ticker": "USDCHF=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "EURGBP": {"ticker": "EURGBP=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "USDJPY": {"ticker": "USDJPY=X", "spread": 1.2, "pip": 0.01,   "decimals": 3},
+    "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01,   "decimals": 3},
+    "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01,   "decimals": 3},
+    
+    # Acciones Robustas (PF > 1.3)
+    "MSFT":   {"ticker": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "TSLA":   {"ticker": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "PG":     {"ticker": "PG",   "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "XOM":    {"ticker": "XOM",  "spread": 5.0, "pip": 0.01, "decimals": 2},
 }
 
 # Bitcoin — par separado con modelo propio
@@ -77,9 +84,10 @@ BTC_PAIRS = {
 }
 
 PAIR_FLAGS = {
-    "EURUSD": "🇪🇺🇺🇸", "GBPUSD": "🇬🇧🇺🇸", "AUDUSD": "🇦🇺🇺🇸",
-    "NZDUSD": "🇳🇿🇺🇸", "USDCAD": "🇺🇸🇨🇦", "USDCHF": "🇺🇸🇨🇭",
-    "EURGBP": "🇪🇺🇬🇧", "BTCUSD": "₿",
+    "GBPUSD": "🇬🇧🇺🇸", "AUDUSD": "🇦🇺🇺🇸", "NZDUSD": "🇳🇿🇺🇸", 
+    "USDCAD": "🇺🇸🇨🇦", "USDCHF": "🇺🇸🇨🇭", "USDJPY": "🇺🇸🇯🇵", 
+    "EURJPY": "🇪🇺🇯🇵", "GBPJPY": "🇬🇧🇯🇵", "BTCUSD": "₿",
+    "MSFT": "💻", "TSLA": "🚗", "PG": "🧴", "XOM": "🛢️"
 }
 
 logging.basicConfig(
@@ -271,22 +279,18 @@ def resample_to_4h(df_1h):
 
 def run_scan(timeframe="Daily"):
     """Escanea todos los pares para un timeframe específico."""
-    tf_config = MODELS.get(timeframe, MODELS["Daily"])
-    buy_path = tf_config["buy"]
-    sell_path = tf_config["sell"]
+    model_path = MODELS.get(timeframe, MODELS["Daily"])
 
     log.info(f"Iniciando scan ML [{timeframe}]...")
 
-    if not os.path.exists(buy_path):
-        log.warning(f"Modelo {timeframe} no encontrado: {buy_path} — skip")
+    if not os.path.exists(model_path):
+        log.warning(f"Modelo {timeframe} no encontrado: {model_path} — skip")
         return []
 
-    model_artifact = joblib.load(buy_path)
-    sell_artifact = joblib.load(sell_path)
+    model_artifact = joblib.load(model_path)
     feature_cols = model_artifact["feature_columns"]
     threshold = model_artifact["threshold"]
     main_model = model_artifact["model"]
-    sell_model = sell_artifact["model"]
 
     # Configuración de descarga por timeframe
     if timeframe == "4H":
@@ -297,6 +301,12 @@ def run_scan(timeframe="Daily"):
         yf_interval, yf_days = "1d", 120
 
     signals = []
+
+    # Portfolio cluster tracking for this scan
+    cluster_counts = {}
+    cluster_risk = {}
+    MAX_PER_CLUSTER = 2
+    MAX_CLUSTER_RISK_PCT = 0.015  # 1.5% max risk per currency
 
     # Elegir pares según timeframe
     scan_pairs = BTC_PAIRS if timeframe == "BTC_Daily" else PAIRS
@@ -328,29 +338,68 @@ def run_scan(timeframe="Daily"):
         if pd.isna(last[feature_cols]).any():
             continue
 
-        X = last[feature_cols].values.reshape(1, -1)
+        X = df.iloc[[-1]][feature_cols]
 
-        main_proba = main_model.predict_proba(X)[0]
-        main_pred = main_model.predict(X)[0]
-        main_conf = main_proba.max()
-
-        sell_proba = sell_model.predict_proba(X)[0]
-        sell_pred = sell_model.predict(X)[0]
-        sell_conf = sell_proba[1] if len(sell_proba) > 1 else 0
+        probas = main_model.predict_proba(X)[0]
 
         signal = "HOLD"
         confidence = 0
 
-        if main_pred == 1 and main_conf >= threshold:
-            signal, confidence = "BUY", main_conf
-        elif sell_pred == 1 and sell_conf >= threshold:
-            signal, confidence = "SELL", sell_conf
-        elif main_pred == 2 and main_conf >= threshold:
-            signal, confidence = "SELL", main_conf
+        if len(probas) >= 3:
+            prob_buy = probas[1]
+            prob_sell = probas[2]
+            
+            if prob_buy >= threshold and prob_buy > prob_sell:
+                signal = "BUY"
+                confidence = prob_buy
+            elif prob_sell >= threshold and prob_sell > prob_buy:
+                signal = "SELL"
+                confidence = prob_sell
+        else:
+            pred = main_model.predict(X)[0]
+            conf = probas.max()
+            if pred == 1 and conf >= threshold:
+                signal = "BUY"
+                confidence = conf
+            elif pred == 2 and conf >= threshold:
+                signal = "SELL"
+                confidence = conf
 
         if signal == "HOLD":
             log.info(f"  {pair}: HOLD")
             continue
+
+        base_curr = pair[:3]
+        quote_curr = pair[3:]
+        
+        # 1. Check Pair Count Constraints (Max 2 per currency)
+        if cluster_counts.get(base_curr, 0) >= MAX_PER_CLUSTER or cluster_counts.get(quote_curr, 0) >= MAX_PER_CLUSTER:
+            log.info(f"  {pair}: {signal} rechazada por límite de clúster (Máx {MAX_PER_CLUSTER} pares para {base_curr}/{quote_curr})")
+            continue
+            
+        # Sizing dinámico conservador basado en probabilidad calibrada
+        base_risk_pct = RISK_PCT # 0.5%
+        max_risk_pct = 0.01      # 1.0% cap para canary por trade
+        alpha = 0.5
+        
+        # Risk = BaseRisk * ( (Prob - Threshold) / (1 - Threshold) ) * alpha + BaseRisk
+        if confidence > threshold:
+            scaled_risk = base_risk_pct * ((confidence - threshold) / (1.0 - threshold)) * alpha + base_risk_pct
+        else:
+            scaled_risk = base_risk_pct
+            
+        adjusted_risk_pct = min(scaled_risk, max_risk_pct)
+        
+        # 2. Check Currency Risk Constraints (Max 1.5% exposure per currency)
+        if cluster_risk.get(base_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT or cluster_risk.get(quote_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT:
+             log.info(f"  {pair}: {signal} rechazada por límite de riesgo correlacionado (Expondría {base_curr}/{quote_curr} a > 1.5%)")
+             continue
+
+        # Validated. Update cluster tracking.
+        cluster_counts[base_curr] = cluster_counts.get(base_curr, 0) + 1
+        cluster_counts[quote_curr] = cluster_counts.get(quote_curr, 0) + 1
+        cluster_risk[base_curr] = cluster_risk.get(base_curr, 0) + adjusted_risk_pct
+        cluster_risk[quote_curr] = cluster_risk.get(quote_curr, 0) + adjusted_risk_pct
 
         close = float(last["Close"])
         atr = float(last["ATR"])
@@ -370,7 +419,8 @@ def run_scan(timeframe="Daily"):
 
         sl_pips = sl_dist / pip
         tp_pips = tp_dist / pip
-        risk_usd = DEFAULT_BALANCE * RISK_PCT
+        
+        risk_usd = DEFAULT_BALANCE * adjusted_risk_pct
         volume = round(risk_usd / (sl_pips * 10), 2)
 
         signals.append({
@@ -392,7 +442,7 @@ def run_scan(timeframe="Daily"):
     bot_state["last_scan"] = datetime.now().isoformat()
     bot_state["last_signals"] = signals
     bot_state["total_scans"] += 1
-    log.info(f"Scan completo: {len(signals)} señal(es)")
+    log.info(f"Scan completo: {len(signals)} señal(es). Riesgo USD total: {cluster_risk.get('USD', 0):.2%}")
     return signals
 
 
@@ -419,7 +469,7 @@ def build_signal_message(s):
         f"🤖 *Confianza:* {s['confidence']:.0%}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 *Volumen ref:*   {s['volume']:.2f} lotes\n"
-        f"⚠️  *Riesgo ref:*   ${s['risk_usd']:.0f}  \\(0\\.5% de $10k\\)\n"
+        f"⚠️  *Riesgo ref:*   ${s['risk_usd']:.0f}  \\({(s['risk_usd']/10000)*100:.1f}% de $10k\\)\n"
         f"✅ *Si TP:*    \\+${s['risk_usd'] * 1.5:.0f}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"_Ajustá lotes según tu capital\\._"
@@ -906,14 +956,21 @@ def run_scheduler():
     log.info(f"📅 Daily scan programado a las {scan_time}")
 
     # 4H: cada 4 horas (si existe el modelo)
-    if os.path.exists(MODELS["4H"]["buy"]):
+    if os.path.exists(MODELS["4H"]):
         schedule.every(4).hours.do(scan_and_broadcast, "4H")
         log.info("⏳ 4H scan programado cada 4 horas")
 
-    # 1H: ELIMINADO — resultados inconsistentes en backtest OOS
+    # 1H (Crypto / Shitcoins Parabolic Reversal) 
+    # Analiza futuros de Binance cada hora en el minuto :01
+    try:
+        from bot_shitcoins import run_scan_job as run_shitcoin_scan
+        schedule.every().hour.at(":01").do(run_shitcoin_scan)
+        log.info("🚀 Shitcoins 1H scan programado cada hora en el minuto :01")
+    except Exception as e:
+        log.warning(f"No se pudo cargar el módulo de shitcoins: {e}")
 
     # BTC Daily: 1x al día junto con forex daily
-    if os.path.exists(MODELS["BTC_Daily"]["buy"]):
+    if os.path.exists(MODELS["BTC_Daily"]):
         schedule.every().day.at(scan_time).do(scan_and_broadcast, "BTC_Daily")
         log.info("₿ BTC Daily scan programado a las " + scan_time)
 

@@ -11,36 +11,41 @@ Usage:
 """
 
 import os
+import sys
 import argparse
 import numpy as np
 import pandas as pd
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
 import joblib
 import yfinance as yf
 from datetime import datetime, timedelta
 
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.calibration import CalibratedClassifierCV
 
 from features import create_features
 from fractals import detect_fractals
 from ml_dataset import label_data
 
 
-# ─── Pares a entrenar ──────────────────────────────────────────────────
+# ─── Pares a entrenar (Activos Robustos OOS 2022-2026) ───────────────────
 PAIRS = {
-    "EURUSD": {"ticker": "EURUSD=X", "spread": 1.0, "pip": 0.0001},
+    # Forex Robusto
     "GBPUSD": {"ticker": "GBPUSD=X", "spread": 1.2, "pip": 0.0001},
     "NZDUSD": {"ticker": "NZDUSD=X", "spread": 1.5, "pip": 0.0001},
     "AUDUSD": {"ticker": "AUDUSD=X", "spread": 1.2, "pip": 0.0001},
     "USDCAD": {"ticker": "USDCAD=X", "spread": 1.5, "pip": 0.0001},
     "USDCHF": {"ticker": "USDCHF=X", "spread": 1.5, "pip": 0.0001},
-    "EURGBP": {"ticker": "EURGBP=X", "spread": 1.5, "pip": 0.0001},
-    "USDJPY": {"ticker": "USDJPY=X", "spread": 1.0, "pip": 0.01},
+    "USDJPY": {"ticker": "USDJPY=X", "spread": 1.2, "pip": 0.01},
     "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01},
     "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01},
-    "AUDJPY": {"ticker": "AUDJPY=X", "spread": 2.0, "pip": 0.01},
-    "NZDJPY": {"ticker": "NZDJPY=X", "spread": 2.5, "pip": 0.01},
-    "EURAUD": {"ticker": "EURAUD=X", "spread": 2.0, "pip": 0.0001},
-    "GBPAUD": {"ticker": "GBPAUD=X", "spread": 2.5, "pip": 0.0001},
+    # Acciones Robustas
+    "MSFT":   {"ticker": "MSFT", "spread": 5.0, "pip": 0.01},
+    "TSLA":   {"ticker": "TSLA", "spread": 5.0, "pip": 0.01},
+    "PG":     {"ticker": "PG",   "spread": 5.0, "pip": 0.01},
+    "XOM":    {"ticker": "XOM",  "spread": 5.0, "pip": 0.01},
 }
 
 # Features que NO son input del modelo
@@ -244,14 +249,25 @@ def train_timeframe(tf_name, lookahead, rr):
         X_te = X_all[train_end:test_end]
         y_te = y_all[train_end:test_end]
 
-        model = GradientBoostingClassifier(
-            n_estimators=200,
-            max_depth=5,
-            learning_rate=0.1,
-            min_samples_leaf=20,
-            subsample=0.8,
+        # Arquitectura Campeona LightGBM Multiclase + GPU
+        import lightgbm as lgb
+        base_model = lgb.LGBMClassifier(
+            device="gpu",           
+            gpu_platform_id=0,
+            gpu_device_id=0,
+            learning_rate=0.061024,
+            n_estimators=155,
+            num_leaves=79,
+            min_data_in_leaf=30,  # Menos estricto en intraday
+            feature_fraction=0.8382,
+            bagging_fraction=0.6932,
+            lambda_l1=3.1021e-07,
+            lambda_l2=9.3739e-07,
+            class_weight="balanced",
             random_state=42,
+            verbose=-1
         )
+        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
         model.fit(X_tr, y_tr)
 
         y_pred = model.predict(X_te)
@@ -295,17 +311,27 @@ def train_timeframe(tf_name, lookahead, rr):
     print(f"\n🎯 Threshold óptimo: {best_th}")
 
     # ─── Entrenar modelos finales ──────────────────────────────────
-    print(f"\n🏋️ Entrenando modelos finales con {len(combined)} filas...")
+    print(f"\n🏋️ Entrenando modelo final unificado con {len(combined)} filas...")
 
-    # Modelo principal (multiclass: HOLD=0, BUY=1, SELL=2)
-    main_model = GradientBoostingClassifier(
-        n_estimators=300,
-        max_depth=5,
-        learning_rate=0.1,
-        min_samples_leaf=20,
-        subsample=0.8,
+    # Modelo principal unificado (multiclass: HOLD=0, BUY=1, SELL=2)
+    import lightgbm as lgb
+    main_base = lgb.LGBMClassifier(
+        device="gpu",           
+        gpu_platform_id=0,
+        gpu_device_id=0,
+        learning_rate=0.061024,
+        n_estimators=155,
+        num_leaves=79,
+        min_data_in_leaf=30,
+        feature_fraction=0.8382,
+        bagging_fraction=0.6932,
+        lambda_l1=3.1021e-07,
+        lambda_l2=9.3739e-07,
+        class_weight="balanced",
         random_state=42,
+        verbose=-1
     )
+    main_model = CalibratedClassifierCV(main_base, method='isotonic', cv=3)
     main_model.fit(X_all, y_all)
 
     main_path = f"model_{tf_name}.joblib"
@@ -314,30 +340,11 @@ def train_timeframe(tf_name, lookahead, rr):
         "feature_columns": feature_cols,
         "threshold": best_th,
     }, main_path)
-    print(f"  💾 Modelo BUY guardado: {main_path}")
+    print(f"  💾 Modelo MULTICLASE guardado: {main_path}")
 
-    # Modelo SELL (binario)
-    y_sell = (combined["target"] == 2).astype(int).values
-    sell_model = GradientBoostingClassifier(
-        n_estimators=300,
-        max_depth=5,
-        learning_rate=0.1,
-        min_samples_leaf=20,
-        subsample=0.8,
-        random_state=42,
-    )
-    sell_model.fit(X_all, y_sell)
-
-    sell_path = f"model_{tf_name}_sell.joblib"
-    joblib.dump({
-        "model": sell_model,
-        "feature_columns": feature_cols,
-        "threshold": best_th,
-    }, sell_path)
-    print(f"  💾 Modelo SELL guardado: {sell_path}")
-
-    # Feature importance
-    importances = pd.Series(main_model.feature_importances_, index=feature_cols)
+    # Feature importance a partir del ensemble calibrado
+    importances_array = np.mean([clf.estimator.feature_importances_ for clf in main_model.calibrated_classifiers_], axis=0)
+    importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\n📊 Top 10 features ({tf_name.upper()}):")
     for feat, imp in importances.head(10).items():
@@ -349,10 +356,10 @@ def train_timeframe(tf_name, lookahead, rr):
 
 # ─── Main ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Multi-Timeframe Model Trainer")
-    parser.add_argument("--tf", type=str, default="4h",
-                        choices=["4h"],
-                        help="Timeframe a entrenar (1H eliminado por bajo rendimiento OOS)")
+    parser = argparse.ArgumentParser(description="Multi-Timeframe Model Trainer (GPU LightGBM)")
+    parser.add_argument("--tf", type=str, default="ALL",
+                        choices=["4h", "1h", "ALL"],
+                        help="Timeframe a entrenar (1h, 4h o ALL)")
     parser.add_argument("--lookahead-4h", type=int, default=10,
                         help="Lookahead para 4H (default: 10 barras = 40h)")
     parser.add_argument("--rr", type=float, default=1.5,
@@ -361,9 +368,12 @@ if __name__ == "__main__":
 
     # Lookahead ajustado por timeframe:
     # 4H: 10 barras = mira 40 horas adelante
-    # Daily (existente): 20 barras = mira 20 días adelante
-    # 1H: ELIMINADO — resultados inconsistentes en backtest OOS
-
-    train_timeframe("4h", lookahead=args.lookahead_4h, rr=args.rr)
+    # 1H: 20 barras = mira 20 horas adelante
+    
+    if args.tf in ["4h", "ALL"]:
+        train_timeframe("4h", lookahead=args.lookahead_4h, rr=args.rr)
+    
+    if args.tf in ["1h", "ALL"]:
+        train_timeframe("1h", lookahead=20, rr=args.rr)
 
     print("\n🎉 Entrenamiento 4H completado!")

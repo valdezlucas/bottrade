@@ -1,327 +1,375 @@
 """
-True Out-of-Sample (OOS) Test Framework — v15
-==============================================
+True Out-of-Sample (OOS) Test Framework — v15 (Phase 1.5 Restored)
+===================================================================
 Framework profesional de evaluacion de robustez.
 Condiciones Estrictas:
-1. Datos 2022-2025 jamas vistos por el modelo.
-2. Split temporal Train(10-18), Val(19-21), OOS(22-25).
-3. Walk-Forward (2y train + 1y test).
-4. Costos estocasticos (Slippage normal N(0.1R, 0.05R)).
-5. Monte Carlo 1000 permutaciones.
-6. Metricas de vanguardia: Ulcer, Calmar, Prob Ruina.
+1. Datos 2022-2026 jamas vistos por el modelo.
+2. Split temporal Train(10-18), Val(19-21), OOS(22-26).
+3. Costos estocasticos (Slippage normal N(0.1R, 0.05R)).
+4. Monte Carlo 1000 permutaciones.
+5. Metricas: CAGR, Sharpe, Sortino, Calmar, Ulcer, PF, Expectancy.
 """
 
 import numpy as np
 import pandas as pd
-import joblib
 import yfinance as yf
 from datetime import datetime
 import sys
+import joblib
+import warnings
 from scipy import stats
-import time
+
+warnings.filterwarnings('ignore')
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from features import create_features
 from fractals import detect_fractals
-from train import prepare_dataset, train_final_model
-from train_sell import prepare_sell_dataset, train_sell_model
 
 # --- CONFIGURACION ---
 PAIRS = {
-    "EURUSD": {"ticker": "EURUSD=X", "pip": 0.0001, "spread": 1.5, "commission": 7.0, "swap": 0.3},
-    "GBPUSD": {"ticker": "GBPUSD=X", "pip": 0.0001, "spread": 2.0, "commission": 7.0, "swap": 0.5},
-    "USDJPY": {"ticker": "USDJPY=X", "pip": 0.01,   "spread": 1.5, "commission": 7.0, "swap": 0.3},
-    "CADJPY": {"ticker": "CADJPY=X", "pip": 0.01,   "spread": 2.0, "commission": 7.0, "swap": 0.3},
-    "CHFJPY": {"ticker": "CHFJPY=X", "pip": 0.01,   "spread": 2.5, "commission": 7.0, "swap": 0.3},
+    "EURUSD": {"ticker": "EURUSD=X", "pip": 0.0001, "spread": 3.0, "commission": 15.0, "swap": 0.3},
+    "GBPUSD": {"ticker": "GBPUSD=X", "pip": 0.0001, "spread": 4.0, "commission": 15.0, "swap": 0.5},
+    "USDJPY": {"ticker": "USDJPY=X", "pip": 0.01,   "spread": 3.0, "commission": 15.0, "swap": 0.3},
+    "CADJPY": {"ticker": "CADJPY=X", "pip": 0.01,   "spread": 4.0, "commission": 15.0, "swap": 0.3},
+    "CHFJPY": {"ticker": "CHFJPY=X", "pip": 0.01,   "spread": 5.0, "commission": 15.0, "swap": 0.3},
 }
 
 SPLITS = {
     "TRAIN": ("2010-02-01", "2018-12-31"),
     "VAL":   ("2019-01-01", "2021-12-31"),
-    "OOS":   ("2022-01-01", "2025-12-31"),
+    "OOS":   ("2022-01-01", "2026-02-22"),
 }
 
-INITIAL_BALANCE = 10000
-RISK_PER_TRADE = 0.005  # 0.5%
+INITIAL_BALANCE        = 10000
+RISK_PER_TRADE         = 0.005   # 0.5% base
+MAX_RISK_PCT           = 0.01    # 1.0% cap
+ALPHA_SIZING           = 0.5
+LOOKAHEAD              = 5       # Extreme exit sensitivity test (5 bars)
 MonteCarloPermutations = 1000
 
-def get_data(ticker, pair, timeframe="1d"):
-    print(f"📥 Descargando {ticker}...")
-    df = yf.download(ticker, start="2010-01-01", end="2026-02-22", interval=timeframe, progress=False)
-    if df.empty: return None
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+def get_data(ticker):
+    print(f"    📥 Descargando {ticker}...")
+    df = yf.download(ticker, start="2010-01-01", end="2026-02-22",
+                     interval="1d", progress=False)
+    if df.empty:
+        return None
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     df = df.reset_index()
     return df.rename(columns={"Date": "Datetime"})
 
 def apply_stochastic_pnl(raw_pnl_usd, risk_usd):
-    """Aplica costos estocasticos (Slippage normal N(0.1R, 0.05R))."""
-    # Slippage medio 10% del riesgo, desvio 5%
     slippage = np.random.normal(0.10 * risk_usd, 0.05 * risk_usd)
     return raw_pnl_usd - slippage
 
-def calculate_advanced_metrics(trades, equity, years):
-    if not trades: return None
-    
+def calculate_metrics(trades, equity, years):
+    if not trades or len(trades) < 2:
+        return None
     pnls = np.array([t['pnl_usd'] for t in trades])
     returns = np.array(equity)
-    
-    # CAGR
+
     total_ret = returns[-1] / returns[0]
-    cagr = (total_ret ** (1/years)) - 1 if years > 0 else 0
-    
-    # Sharpe & Sortino
+    cagr = (total_ret ** (1 / years)) - 1 if years > 0 else 0
+
     daily_returns = np.diff(returns) / returns[:-1]
-    sharpe = (np.mean(daily_returns) / np.std(daily_returns) * np.sqrt(252)) if len(daily_returns) > 1 and np.std(daily_returns) > 0 else 0
-    
-    neg_returns = daily_returns[daily_returns < 0]
-    sortino = (np.mean(daily_returns) / np.std(neg_returns) * np.sqrt(252)) if len(neg_returns) > 1 and np.std(neg_returns) > 0 else 0
-    
-    # Drawdown & Ulcer
+    sharpe   = (np.mean(daily_returns) / np.std(daily_returns) * np.sqrt(252)) if np.std(daily_returns) > 0 else 0
+    neg_ret  = daily_returns[daily_returns < 0]
+    sortino  = (np.mean(daily_returns) / np.std(neg_ret) * np.sqrt(252)) if len(neg_ret) > 1 and np.std(neg_ret) > 0 else 0
+
     max_dd = 0
     peak = returns[0]
     drawdowns = []
     for r in returns:
-        peak = max(peak, r)
+        if r > peak:
+            peak = r
         dd = (peak - r) / peak
         drawdowns.append(dd)
         max_dd = max(max_dd, dd)
-    
-    ulcer_index = np.sqrt(np.mean(np.square(drawdowns))) * 100
+
+    ulcer  = np.sqrt(np.mean(np.square(drawdowns))) * 100
     calmar = (cagr / max_dd) if max_dd > 0 else 0
-    
-    # Expectancy
-    win_rate = len(pnls[pnls > 0]) / len(pnls)
-    avg_w = np.mean(pnls[pnls > 0]) if any(pnls > 0) else 0
-    avg_l = abs(np.mean(pnls[pnls <= 0])) if any(pnls <= 0) else 1e-6
+
+    win_rate   = len(pnls[pnls > 0]) / len(pnls)
+    avg_w      = np.mean(pnls[pnls > 0]) if any(pnls > 0) else 0
+    avg_l      = abs(np.mean(pnls[pnls <= 0])) if any(pnls <= 0) else 1e-6
     expectancy = (win_rate * avg_w) - ((1 - win_rate) * avg_l)
-    
+
     return {
-        "CAGR": cagr * 100,
-        "MaxDD": max_dd * 100,
+        "CAGR":   cagr * 100,
+        "MaxDD":  max_dd * 100,
         "Sharpe": sharpe,
-        "Sortino": sortino,
+        "Sortino":sortino,
         "Calmar": calmar,
-        "Ulcer": ulcer_index,
-        "Exp": expectancy,
-        "WR": win_rate * 100,
-        "PF": np.sum(pnls[pnls > 0]) / abs(np.sum(pnls[pnls <= 0])) if any(pnls <= 0) else 99
+        "Ulcer":  ulcer,
+        "Exp":    expectancy,
+        "WR":     win_rate * 100,
+        "PF":     np.sum(pnls[pnls > 0]) / abs(np.sum(pnls[pnls <= 0])) if any(pnls <= 0) else 99,
+        "n_trades": len(trades),
     }
 
-def monte_carlo_sim(trades, initial_balance, risk_pct):
-    permutations = []
-    ruins = 0
-    
-    pnls = np.array([t['pnl_usd'] for t in trades])
+def monte_carlo_sim(trades, initial_balance):
+    pnls       = np.array([t['pnl_usd'] for t in trades])
+    results    = []
+    ruins      = 0
     for _ in range(MonteCarloPermutations):
         shuffled = np.random.permutation(pnls)
         bal = initial_balance
-        path = [initial_balance]
         ruined = False
         for p in shuffled:
             bal += p
-            path.append(bal)
-            if bal <= initial_balance * 0.5: # Ruina definida como 50% DD
+            if bal <= initial_balance * 0.5:
                 ruined = True
-        permutations.append(path[-1])
-        if ruined: ruins += 1
-        
-    permutations = np.sort(permutations)
-    p5 = permutations[int(0.05 * MonteCarloPermutations)]
-    prob_ruin = (ruins / MonteCarloPermutations) * 100
-    
-    return p5, prob_ruin
+        results.append(bal)
+        if ruined:
+            ruins += 1
+    results = np.sort(results)
+    return {
+        "p5":        results[int(0.05 * len(results))],
+        "p95":       results[int(0.95 * len(results))],
+        "mean":      np.mean(results),
+        "prob_ruin": (ruins / MonteCarloPermutations) * 100,
+    }
 
-def run_oos_audit(pair_name, df, buy_model, sell_model, features, start_date, end_date, cfg):
-    """Corre backtest en periodo especifico."""
-    mask = (df['Datetime'] >= start_date) & (df['Datetime'] <= end_date)
-    df_period = df.loc[mask].copy().reset_index(drop=True)
-    if len(df_period) < 50: return None, None
-    
-    df_feat = create_features(df_period)
-    df_feat = detect_fractals(df_feat)
-    df_feat = df_feat.dropna(subset=features).reset_index(drop=True)
-    
-    if df_feat.empty: return None, None
-    
-    X = df_feat[features].values
-    buy_proba = buy_model.predict_proba(X)
-    sell_proba = sell_model.predict_proba(X)
-    
-    buy_th = 0.6 # Fijo para OOS Real
-    sell_th = 0.7 # Fijo para OOS Real
-    
-    trades = []
+def run_backtest(df_feat, art, feature_cols, start_date, end_date, cfg):
+    """
+    Backtest bar-by-bar con TP/SL en OHLC real.
+    Usa el modelo multi-clase (classes=[0=HOLD, 1=BUY, 2=SELL]).
+    Sin lookahead. Features on-the-fly.
+    """
+    mask = (df_feat['Datetime'] >= start_date) & (df_feat['Datetime'] <= end_date)
+    df_p = df_feat.loc[mask].copy().reset_index(drop=True)
+    if len(df_p) < 50:
+        return None, None
+
+    missing = [c for c in feature_cols if c not in df_p.columns]
+    if missing:
+        print(f"    ⚠️  Columnas faltantes ({len(missing)}): {missing[:3]}")
+        return None, None
+
+    X = df_p[feature_cols].values
+    model = art['model']
+    probas = model.predict_proba(X)   # shape (N, 3): [P(HOLD), P(BUY), P(SELL)]
+
+    th = art.get('threshold', 0.51)   # Threshold del artefacto (guardado por main.py)
+
+    trades  = []
     balance = INITIAL_BALANCE
-    equity = [INITIAL_BALANCE]
-    
-    # Simulacion simple bar-by-bar (OHLC)
-    cur = None
-    for i in range(len(df_feat)):
-        h, l, c = df_feat['High'].iloc[i], df_feat['Low'].iloc[i], df_feat['Close'].iloc[i]
-        atr = df_feat['ATR'].iloc[i]
-        
-        if cur and cur['open']:
-            hit_tp = False
-            hit_sl = False
-            if cur['dir'] == "BUY":
-                if h >= cur['tp']: hit_tp = True
-                if l <= cur['sl']: hit_sl = True
+    equity  = [INITIAL_BALANCE]
+
+    for i in range(len(df_p) - LOOKAHEAD):
+        prob_buy  = probas[i, 1]
+        prob_sell = probas[i, 2]
+
+        buy_sig  = prob_buy  >= th
+        sell_sig = prob_sell >= th
+
+        if not buy_sig and not sell_sig:
+            equity.append(balance)
+            continue
+
+        # Dirección
+        if buy_sig and not sell_sig:
+            sig_dir, conf = "BUY", prob_buy
+        elif sell_sig and not buy_sig:
+            sig_dir, conf = "SELL", prob_sell
+        else:
+            if (prob_buy - th) >= (prob_sell - th):
+                sig_dir, conf = "BUY", prob_buy
             else:
-                if l <= cur['tp']: hit_tp = True
-                if h >= cur['sl']: hit_sl = True
-                
-            if hit_tp or hit_sl:
-                risk_usd = balance * RISK_PER_TRADE
-                pnl_raw = (cur['tp'] - cur['entry']) if hit_tp else (cur['sl'] - cur['entry'])
-                if cur['dir'] == "SELL": pnl_raw *= -1
-                
-                # Convertir pips a USD aproximado via ATR
-                pnl_usd = (pnl_raw / atr) * risk_usd if atr > 0 else 0
-                pnl_usd = apply_stochastic_pnl(pnl_usd, risk_usd)
-                pnl_usd -= cfg['commission']
-                
-                balance += pnl_usd
-                cur['pnl_usd'] = pnl_usd
-                cur['open'] = False
-                trades.append(cur)
-                cur = None
+                sig_dir, conf = "SELL", prob_sell
+
+        # Sizing
+        if conf > th and th < 1.0:
+            scaled = RISK_PER_TRADE * ((conf - th) / (1.0 - th)) * ALPHA_SIZING + RISK_PER_TRADE
+        else:
+            scaled = RISK_PER_TRADE
+        adj_risk_pct = min(scaled, MAX_RISK_PCT)
+        risk_usd     = balance * adj_risk_pct
+
+        # Setup TP/SL
+        entry  = df_p['Close'].iloc[i]
+        atr    = df_p['ATR'].iloc[i] if 'ATR' in df_p.columns and not np.isnan(df_p['ATR'].iloc[i]) else entry * 0.005
+        sl_dist = max(atr * 1.0, entry * 0.001) # Mismo que labeling
+        tp_dist = sl_dist * 1.5
+
+        # Tracking multibar (max 20 bars)
+        hit_tp = False
+        hit_sl = False
+        exit_idx = i + LOOKAHEAD
         
-        if not cur:
-            buy_sig = (buy_proba[i, 1] >= buy_th)
-            sell_sig = (sell_proba[i, 1] >= sell_th) # Modelo binario sell
+        for j in range(i + 1, i + 1 + LOOKAHEAD):
+            if j >= len(df_p): break
             
-            if buy_sig or sell_sig:
-                sig_dir = "BUY" if buy_sig else "SELL"
-                entry = c
-                sl_dist = atr * 1.5
-                tp_dist = sl_dist * 1.5
+            high = df_p['High'].iloc[j]
+            low  = df_p['Low'].iloc[j]
+            
+            if sig_dir == "BUY":
+                sl_touched = low <= (entry - sl_dist)
+                tp_touched = high >= (entry + tp_dist)
                 
-                cur = {
-                    "dir": sig_dir,
-                    "entry": entry,
-                    "sl": entry - sl_dist if sig_dir == "BUY" else entry + sl_dist,
-                    "tp": entry + tp_dist if sig_dir == "BUY" else entry - tp_dist,
-                    "open": True
-                }
-        
+                if sl_touched and tp_touched:
+                    hit_sl = True # Worst case: SL hits first
+                    exit_idx = j
+                    break
+                elif sl_touched:
+                    hit_sl = True
+                    exit_idx = j
+                    break
+                elif tp_touched:
+                    hit_tp = True
+                    exit_idx = j
+                    break
+                    
+            else: # SELL
+                sl_touched = high >= (entry + sl_dist)
+                tp_touched = low <= (entry - tp_dist)
+                
+                if sl_touched and tp_touched:
+                    hit_sl = True # Worst case
+                    exit_idx = j
+                    break
+                elif sl_touched:
+                    hit_sl = True
+                    exit_idx = j
+                    break
+                elif tp_touched:
+                    hit_tp = True
+                    exit_idx = j
+                    break
+
+        # Result
+        raw_pnl = risk_usd * 1.5 if hit_tp else -risk_usd
+        # Si no tocó nada en 20 velas, cerramos a precio de mercado (timeout)
+        if not hit_tp and not hit_sl:
+            last_close = df_p['Close'].iloc[i + LOOKAHEAD]
+            if sig_dir == "BUY":
+                raw_pnl = ((last_close - entry) / sl_dist) * risk_usd
+            else:
+                raw_pnl = ((entry - last_close) / sl_dist) * risk_usd
+
+        pnl_net = apply_stochastic_pnl(raw_pnl, risk_usd) - cfg['commission']
+        balance = max(balance + pnl_net, 1.0)
         equity.append(balance)
-        
+
+        trades.append({
+            'dir':     sig_dir,
+            'conf':    round(conf, 4),
+            'pnl_usd': pnl_net,
+            'hit_tp':  hit_tp,
+        })
+
     return trades, equity
 
-def main():
-    print(f"\n{'='*100}")
-    print(f"  TRUE OUT-OF-SAMPLE TEST FRAMEWORK v15")
-    print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*100}\n")
-    
-    results = {}
-    
-    for name, cfg in PAIRS.items():
-        print(f"\n--- Analizando {name} ---")
-        df = get_data(cfg['ticker'], name)
-        if df is None: continue
-        
-        # 1. TRAIN: 2010-2018 (Usamos modelos actuales entrenados con esta data)
-        # 2. VALIDATION: 2019-2021
-        # 3. OOS: 2022-2025
-        
-        # Cargar modelos actuales
-        try:
-            buy_art = joblib.load("model_multi.joblib")
-            sell_art = joblib.load("model_multi_sell.joblib")
-            features = buy_art['feature_columns']
-            buy_model = buy_art['model']
-            sell_model = sell_art['model']
-        except:
-            print(f"❌ Error cargando modelos para {name}")
-            continue
-            
-        print(f"🔬 Corriendo Backtests...")
-        
-        # Validation Period
-        val_trades, val_equity = run_oos_audit(name, df, buy_model, sell_model, features, SPLITS['VAL'][0], SPLITS['VAL'][1], cfg)
-        val_metrics = calculate_advanced_metrics(val_trades, val_equity, 3.0)
-        
-        # OOS Final (Moment of Truth)
-        oos_trades, oos_equity = run_oos_audit(name, df, buy_model, sell_model, features, SPLITS['OOS'][0], SPLITS['OOS'][1], cfg)
-        oos_metrics = calculate_advanced_metrics(oos_trades, oos_equity, 3.1) # 2022 a Feb 2025 aprox 3.1 años
-        
-        if not val_metrics or not oos_metrics:
-            print(f"⚠️ Datos insuficientes para {name}")
-            continue
-            
-        # Monte Carlo en OOS
-        mc_p5, prob_ruin = monte_carlo_sim(oos_trades, INITIAL_BALANCE, RISK_PER_TRADE)
-        
-        # Robustness Check
-        overfit = oos_metrics['PF'] < val_metrics['PF'] * 0.6
-        fragile = oos_metrics['WR'] < val_metrics['WR'] - 10
-        
-        results[name] = {
-            "VAL": val_metrics,
-            "OOS": oos_metrics,
-            "OOS_trades": oos_trades,
-            "MC_P5": mc_p5,
-            "P_RUIN": prob_ruin,
-            "ROBUST": not (overfit or fragile),
-            "REASON": ("OVERFIT" if overfit else "") + (" FRAGILE" if fragile else "") or "STABLE"
-        }
-        
-        print(f"   [VAL] WR: {val_metrics['WR']:.1f}% | PF: {val_metrics['PF']:.2f} | Sharpe: {val_metrics['Sharpe']:.2f}")
-        print(f"   [OOS] WR: {oos_metrics['WR']:.1f}% | PF: {oos_metrics['PF']:.2f} | Sharpe: {oos_metrics['Sharpe']:.2f}")
-        print(f"   [MC]  Worst-Case Equity: ${mc_p5:.0f} | Prob Ruina: {prob_ruin:.1f}%")
-        status = "✅ ROBUSTO" if results[name]['ROBUST'] else f"❌ {results[name]['REASON']}"
-        print(f"   VEREDICTO: {status}")
 
-    # --- REPORTE COMPARATIVO ---
-    print(f"\n\n{'='*100}")
-    print(f"  COMPARATIVA FINAL: VALIDATION vs OOS REAL")
-    print(f"{'='*100}")
-    print(f"{'Pair':<10} | {'Val PF':>7} | {'OOS PF':>7} | {'Val WR':>7} | {'OOS WR':>7} | {'Status':<15}")
-    print(f"{'-'*100}")
-    
+def main():
+    print(f"\n{'='*80}")
+    print(f"  TRUE OOS TEST FRAMEWORK v15 — Phase 1.5 Restored")
+    print(f"  Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*80}\n")
+
+    # Cargar modelo multi-clase de Phase 1.5 (classes=[0=HOLD, 1=BUY, 2=SELL])
+    try:
+        art          = joblib.load("model_multi.joblib")
+        feature_cols = art['feature_columns']
+        print(f"✅ model_multi.joblib cargado | classes=[0,1,2] | threshold={art.get('threshold', '?')} | features={len(feature_cols)}\n")
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        print("   Asegurate de tener model_multi.joblib (generado por main.py).")
+        return
+
+    results = {}
+
+    for name, cfg in PAIRS.items():
+        print(f"\n{'─'*60}")
+        print(f"  {name}")
+        print(f"{'─'*60}")
+
+        df_raw = get_data(cfg['ticker'])
+        if df_raw is None:
+            print(f"  ❌ Sin datos para {name}")
+            continue
+
+        # Construir features on-the-fly (idéntico al pipeline de entrenamiento)
+        print(f"    ⚙️  Construyendo features...")
+        try:
+            df_feat = create_features(df_raw.copy())
+            df_feat = detect_fractals(df_feat)
+            df_feat = df_feat.dropna(subset=feature_cols).reset_index(drop=True)
+        except Exception as e:
+            print(f"  ❌ Error features: {e}")
+            continue
+
+        if df_feat.empty:
+            print(f"  ❌ DataFrame vacio tras features")
+            continue
+
+        # === VALIDATION (2019-2021) ===
+        print(f"    🔬 VALIDATION 2019-2021...")
+        v_trades, v_equity = run_backtest(
+            df_feat, art, feature_cols,
+            SPLITS['VAL'][0], SPLITS['VAL'][1], cfg
+        )
+        v_m = calculate_metrics(v_trades, v_equity, 3.0)
+
+        # === OOS (2022-2026) — MOMENTO DE LA VERDAD ===
+        print(f"    🎯 OOS 2022-2026... ← NUNCA VISTO POR EL MODELO")
+        o_trades, o_equity = run_backtest(
+            df_feat, art, feature_cols,
+            SPLITS['OOS'][0], SPLITS['OOS'][1], cfg
+        )
+        o_m = calculate_metrics(o_trades, o_equity, 4.1)
+
+        if not v_m or not o_m:
+            print(f"  ⚠️ Sin trades suficientes para {name}")
+            continue
+
+        mc = monte_carlo_sim(o_trades, INITIAL_BALANCE)
+
+        overfit  = (o_m['PF'] < v_m['PF'] * 0.60) and v_m['PF'] > 1.0
+        fragile  = o_m['WR'] < v_m['WR'] - 15
+        is_robust = o_m['PF'] > 1.3 and not overfit and not fragile
+
+        results[name] = {
+            "VAL":    v_m,
+            "OOS":    o_m,
+            "MC":     mc,
+            "ROBUST": is_robust,
+            "REASON": ("OVERFIT " if overfit else "") + ("FRAGILE" if fragile else "") or "STABLE",
+        }
+
+        print(f"\n  {'─'*50}")
+        print(f"  VAL 2019-21 | PF: {v_m['PF']:>6.2f} | WR: {v_m['WR']:>5.1f}% | Sharpe: {v_m['Sharpe']:>5.2f} | Exp: ${v_m['Exp']:>7.2f} | Trades: {v_m['n_trades']}")
+        print(f"  OOS 2022-26 | PF: {o_m['PF']:>6.2f} | WR: {o_m['WR']:>5.1f}% | Sharpe: {o_m['Sharpe']:>5.2f} | Exp: ${o_m['Exp']:>7.2f} | Trades: {o_m['n_trades']}")
+        print(f"  Monte Carlo | Mean: ${mc['mean']:.0f} | P5: ${mc['p5']:.0f} | P95: ${mc['p95']:.0f} | P(Ruina): {mc['prob_ruin']:.1f}%")
+        v = "✅ ROBUSTO" if is_robust else f"❌ {results[name]['REASON']}"
+        print(f"  VEREDICTO   | {v}")
+
+    # ── REPORTE FINAL ──────────────────────────────────────
+    if not results:
+        print("\n❌ Sin resultados. Revisar modelos y datos.")
+        return
+
+    print(f"\n\n{'='*80}")
+    print(f"  RESUMEN FINAL: VALIDATION vs OOS")
+    print(f"{'='*80}")
+    print(f"{'Par':<10} | {'VAL PF':>7} | {'OOS PF':>7} | {'VAL WR':>7} | {'OOS WR':>7} | {'MaxDD':>7} | {'Sharpe':>6} | Status")
+    print(f"{'─'*80}")
+
     for name, res in results.items():
         v, o = res['VAL'], res['OOS']
-        status = "✅ ROBUSTO" if res['ROBUST'] else f"❌ {res['REASON']}"
-        print(f"{name:<10} | {v['PF']:>7.2f} | {o['PF']:>7.2f} | {v['WR']:>6.1f}% | {o['WR']:>6.1f}% | {status:<15}")
-        
-    # --- CORRELACION Y DD AGREGADO (OOS Period) ---
-    print(f"\n\n{'='*100}")
-    print(f"  ANALISIS DE CARTERA (OOS 2022-2025)")
-    print(f"{'='*100}")
-    
-    all_oos_returns = []
-    pair_names = []
-    for name in results:
-        trades = results[name].get('OOS_trades', [])
-        if not trades: continue
-        
-        # Serie de retornos (en USD)
-        returns = [t['pnl_usd'] for t in trades]
-        if len(returns) < 10: continue
-        
-        # Pad with zeros to equalize lengths for a rough correlation check
-        all_oos_returns.append(returns)
-        pair_names.append(name)
-        
-    if len(all_oos_returns) > 1:
-        # Equalize lengths with zeros at the end
-        max_len = max(len(r) for r in all_oos_returns)
-        padded_returns = [r + [0]*(max_len - len(r)) for r in all_oos_returns]
-        
-        corr_df = pd.DataFrame(np.array(padded_returns).T, columns=pair_names).corr()
-        print("\n📊 Matriz de Correlación de Retornos (Trades):")
-        print(corr_df.round(2).to_string())
-        
-        # DD Agregado (Suma simple de DDs como proxy conservador)
-        avg_dd = np.mean([results[n]['OOS']['MaxDD'] for n in results])
-        max_dd_sum = np.sum([results[n]['OOS']['MaxDD'] for n in results]) 
-        print(f"\n📈 Drawdown Promedio OOS: {avg_dd:.2f}%")
-        print(f"📉 Drawdown Agregado Teórico (Suma): {max_dd_sum:.2f}% (Escenario catastrófico)")
-    else:
-        print("\n⚠️ No hay suficientes pares con trades para correlacion.")
+        st = "✅ ROBUSTO" if res['ROBUST'] else f"❌ {res['REASON']}"
+        print(f"{name:<10} | {v['PF']:>7.2f} | {o['PF']:>7.2f} | {v['WR']:>6.1f}% | {o['WR']:>6.1f}% | {o['MaxDD']:>6.1f}% | {o['Sharpe']:>6.2f} | {st}")
+
+    robust_n = sum(1 for r in results.values() if r['ROBUST'])
+    total_n  = len(results)
+    print(f"\n  Robustez: {robust_n}/{total_n} pares superaron el OOS.")
+    print(f"\n  ⚠️  RECORDATORIO DE PROTOCOLO:")
+    print(f"  → Si OOS es positivo: Canary Live 30 días en Demo (mismo broker, mismo sizing).")
+    print(f"  → Registrar: slippage real, fills, spread horario.")
+    print(f"  → NO ajustar nada hasta completar el Canary Live.")
+    print(f"\n{'='*80}\n")
 
 
 if __name__ == "__main__":

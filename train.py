@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
 import joblib
-from sklearn.ensemble import RandomForestClassifier
+import lightgbm as lgb
 from sklearn.metrics import classification_report
+from sklearn.calibration import CalibratedClassifierCV
 
 from data import load_data
 from fractals import detect_fractals
@@ -16,6 +17,7 @@ EXCLUDE_COLS = [
     "Open", "High", "Low", "Close", "Volume",
     "target", "potential_win", "potential_loss",
     "fractal_high", "fractal_low",
+    "Datetime", "Date",
 ]
 
 
@@ -92,15 +94,25 @@ def walk_forward_train(df, n_folds=4, costs=None, thresholds=None):
         y_train = df_train["target"].values
         X_test = df_test[feature_cols].values
 
-        # Entrenar modelo con class_weight balanceado
-        model = RandomForestClassifier(
-            n_estimators=200,
-            max_depth=10,
-            min_samples_leaf=20,
+        # Entrenar modelo LightGBM con GPU (Champion Params Trial 67)
+        base_model = lgb.LGBMClassifier(
+            device="gpu",
+            gpu_platform_id=0,
+            gpu_device_id=0,
+            learning_rate=0.061024,
+            n_estimators=155,
+            num_leaves=79,
+            min_data_in_leaf=100,
+            feature_fraction=0.8382,
+            bagging_fraction=0.6932,
+            lambda_l1=3.1021e-07,
+            lambda_l2=9.3739e-07,
             class_weight="balanced",
             random_state=42,
-            n_jobs=-1,
+            n_jobs=2, # Deja nucleos libres para Windows
+            verbose=-1
         )
+        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
         model.fit(X_train, y_train)
 
         # Predicciones y probabilidades
@@ -159,14 +171,25 @@ def train_final_model(df, model_path="model.joblib", threshold=0.6):
 
     print(f"\n🏋️ Entrenando modelo final con {len(df)} filas...")
 
-    model = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=10,
-        min_samples_leaf=20,
+    # Entrenamiento final con GPU
+    base_model = lgb.LGBMClassifier(
+        device="gpu",
+        gpu_platform_id=0,
+        gpu_device_id=0,
+        learning_rate=0.061024,
+        n_estimators=155,
+        num_leaves=79,
+        min_data_in_leaf=100,
+        feature_fraction=0.8382,
+        bagging_fraction=0.6932,
+        lambda_l1=3.1021e-07,
+        lambda_l2=9.3739e-07,
         class_weight="balanced",
         random_state=42,
-        n_jobs=-1,
+        n_jobs=2,
+        verbose=-1
     )
+    model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
     model.fit(X, y)
 
     # Guardar modelo + metadata
@@ -181,8 +204,10 @@ def train_final_model(df, model_path="model.joblib", threshold=0.6):
     print(f"   Threshold óptimo: {threshold}")
     print(f"   Features: {len(feature_cols)}")
 
-    # Feature importance
-    importances = pd.Series(model.feature_importances_, index=feature_cols)
+    # Feature importance del modelo base LightGBM dentro del calibrado
+    # LGBM usa .feature_importances_ igual que scikit-learn
+    importances_array = np.mean([clf.estimator.feature_importances_ for clf in model.calibrated_classifiers_], axis=0)
+    importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\n📊 Top 10 features más importantes:")
     for feat, imp in importances.head(10).items():

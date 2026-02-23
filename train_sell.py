@@ -17,6 +17,7 @@ if sys.platform == "win32":
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
+from sklearn.calibration import CalibratedClassifierCV
 
 from features import create_features
 from fractals import detect_fractals
@@ -75,7 +76,7 @@ def walk_forward_sell(df, feature_cols, n_folds=4, costs=None):
         X_test = df_test[feature_cols].values
         y_test = df_test["sell_target"].values
 
-        model = RandomForestClassifier(
+        base_model = RandomForestClassifier(
             n_estimators=200,
             max_depth=10,
             min_samples_leaf=20,
@@ -83,6 +84,7 @@ def walk_forward_sell(df, feature_cols, n_folds=4, costs=None):
             random_state=42,
             n_jobs=-1,
         )
+        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
         model.fit(X_train, y_train)
 
         y_pred = model.predict(X_test)
@@ -167,7 +169,7 @@ def train_sell_model(data_path, model_path="model_sell.joblib", lookahead=20, rr
     X = df[feature_cols].values
     y = df["sell_target"].values
 
-    model = RandomForestClassifier(
+    base_model = RandomForestClassifier(
         n_estimators=200,
         max_depth=10,
         min_samples_leaf=20,
@@ -175,6 +177,7 @@ def train_sell_model(data_path, model_path="model_sell.joblib", lookahead=20, rr
         random_state=42,
         n_jobs=-1,
     )
+    model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
     model.fit(X, y)
 
     artifact = {
@@ -185,8 +188,9 @@ def train_sell_model(data_path, model_path="model_sell.joblib", lookahead=20, rr
     joblib.dump(artifact, model_path)
     print(f"Modelo SELL guardado: {model_path} (threshold: {optimal_th})")
 
-    # Feature importance
-    importances = pd.Series(model.feature_importances_, index=feature_cols)
+    # Feature importance a partir del ensemble calibrado
+    importances_array = np.mean([clf.estimator.feature_importances_ for clf in model.calibrated_classifiers_], axis=0)
+    importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\nTop 10 features SELL:")
     for feat, imp in importances.head(10).items():

@@ -31,8 +31,8 @@ def cmd_train(args):
         print(f"\n⚠️  ADVERTENCIA: Solo {len(df)} filas. Se recomiendan mínimo 500 "
               "para walk-forward con 4 folds.")
 
-    # Walk-forward validation
-    thresholds = [0.50, 0.55, 0.60, 0.65, 0.70]
+    # Walk-forward validation - Expandimos para buscar mayor densidad de señales
+    thresholds = [0.45, 0.47, 0.49, 0.51, 0.53, 0.55]
     fold_results = walk_forward_train(df, n_folds=4, costs=costs, thresholds=thresholds)
 
     # Resumen de folds

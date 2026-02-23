@@ -46,15 +46,23 @@ try:
 except Exception:
     TELEGRAM_ENABLED = False
 
-# Configuración de pares MT5
+# Configuración de pares MT5 (Activos Robustos OOS 2022-2026)
 MT5_PAIRS = {
-    "EURUSD": {"symbol": "EURUSD", "spread": 1.0, "pip": 0.0001, "decimals": 5},
+    # Forex Robusto
     "GBPUSD": {"symbol": "GBPUSD", "spread": 1.2, "pip": 0.0001, "decimals": 5},
     "NZDUSD": {"symbol": "NZDUSD", "spread": 1.5, "pip": 0.0001, "decimals": 5},
     "AUDUSD": {"symbol": "AUDUSD", "spread": 1.2, "pip": 0.0001, "decimals": 5},
     "USDCAD": {"symbol": "USDCAD", "spread": 1.5, "pip": 0.0001, "decimals": 5},
     "USDCHF": {"symbol": "USDCHF", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "EURGBP": {"symbol": "EURGBP", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "USDJPY": {"symbol": "USDJPY", "spread": 1.2, "pip": 0.01,   "decimals": 3},
+    "EURJPY": {"symbol": "EURJPY", "spread": 1.5, "pip": 0.01,   "decimals": 3},
+    "GBPJPY": {"symbol": "GBPJPY", "spread": 2.0, "pip": 0.01,   "decimals": 3},
+    
+    # Acciones Robustas
+    "MSFT":   {"symbol": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "TSLA":   {"symbol": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "PG":     {"symbol": "PG",   "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "XOM":    {"symbol": "XOM",  "spread": 5.0, "pip": 0.01, "decimals": 2},
 }
 
 
@@ -106,7 +114,7 @@ def get_mt5_data(symbol, timeframe=mt5.TIMEFRAME_D1, bars=120):
     return df[["Open", "High", "Low", "Close", "Volume"]].reset_index(drop=True)
 
 
-def generate_mt5_signal(df, model_artifact, sell_artifact):
+def generate_mt5_signal(df, model_artifact):
     """Genera señal ML para la última vela."""
     df = create_features(df)
     df = detect_fractals(df)
@@ -118,32 +126,35 @@ def generate_mt5_signal(df, model_artifact, sell_artifact):
     if pd.isna(last[feature_cols]).any():
         return None
 
-    X = last[feature_cols].values.reshape(1, -1)
+    X = df.iloc[[-1]][feature_cols]
 
-    # Modelo principal
+    # Modelo principal unificado (Multiclase: 0=HOLD, 1=BUY, 2=SELL)
     main_model = model_artifact["model"]
-    main_proba = main_model.predict_proba(X)[0]
-    main_pred = main_model.predict(X)[0]
-    main_conf = main_proba.max()
-
-    # Modelo SELL
-    sell_model = sell_artifact["model"]
-    sell_proba = sell_model.predict_proba(X)[0]
-    sell_pred = sell_model.predict(X)[0]
-    sell_conf = sell_proba[1] if len(sell_proba) > 1 else 0
+    probas = main_model.predict_proba(X)[0]
 
     signal = "HOLD"
     confidence = 0
 
-    if main_pred == 1 and main_conf >= threshold:
-        signal = "BUY"
-        confidence = main_conf
-    elif sell_pred == 1 and sell_conf >= threshold:
-        signal = "SELL"
-        confidence = sell_conf
-    elif main_pred == 2 and main_conf >= threshold:
-        signal = "SELL"
-        confidence = main_conf
+    if len(probas) >= 3:
+        prob_buy = probas[1]
+        prob_sell = probas[2]
+        
+        if prob_buy >= threshold:
+            signal = "BUY"
+            confidence = prob_buy
+        elif prob_sell >= threshold:
+            signal = "SELL"
+            confidence = prob_sell
+    else:
+        # Fallback temporal si detecta un modelo viejo binario
+        pred = main_model.predict(X)[0]
+        conf = probas.max()
+        if pred == 1 and conf >= threshold:
+            signal = "BUY"
+            confidence = conf
+        elif pred == 2 and conf >= threshold:
+            signal = "SELL"
+            confidence = conf
 
     return {
         "signal": signal,
@@ -166,7 +177,7 @@ def get_current_positions(symbol=None):
     return list(positions)
 
 
-def open_trade_mt5(symbol, signal, atr, config, risk_pct=0.005, rr_ratio=1.5):
+def open_trade_mt5(symbol, signal, atr, config, risk_pct=0.005, rr_ratio=1.5, tf="1d"):
     """Abre un trade en MT5 con SL y TP."""
     info = mt5.account_info()
     if info is None:
@@ -227,8 +238,8 @@ def open_trade_mt5(symbol, signal, atr, config, risk_pct=0.005, rr_ratio=1.5):
         "sl": sl,
         "tp": tp,
         "deviation": 20,  # Max slippage en puntos
-        "magic": 202602,  # ID del bot
-        "comment": f"MLBOT {signal}",
+        "magic": 202604 if tf == "4h" else 202602,  # ID del bot segun TF
+        "comment": f"MLBOT {tf.upper()} {signal}",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
@@ -326,18 +337,18 @@ def show_positions():
     print(f"\n  Total P&L: ${total_pnl:+.2f}")
 
 
-def run_mt5_scanner(model_path="model_multi.joblib",
-                    sell_model_path="model_multi_sell.joblib",
+def run_mt5_scanner(model_path=None,
                     balance_override=None,
                     risk_pct=0.005,
                     rr_ratio=1.5,
                     scan_only=False,
                     only_pair=None,
-                    close_all=False):
+                    close_all=False,
+                    tf="1d"):
     """Pipeline principal: conectar → escanear → ejecutar."""
 
     print("═" * 70)
-    print(f"  🤖  MT5 AUTO-TRADER — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"  🤖  MT5 AUTO-TRADER [{tf.upper()}] — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("═" * 70)
 
     # 1. Conectar
@@ -367,40 +378,51 @@ def run_mt5_scanner(model_path="model_multi.joblib",
     print(f"     Riesgo:    {risk_pct*100:.1f}% (${risk_usd:.2f}/trade)")
     print(f"     R:R:       1:{rr_ratio}")
 
-    # 2. Cargar modelos
+    # 2. Cargar modelos basados en TF
+    if model_path is None:
+        model_path = "model_4h.joblib" if tf == "4h" else "model_multi.joblib"
+    
     if not os.path.exists(model_path):
         print(f"\n  ❌ Modelo no encontrado: {model_path}")
         mt5.shutdown()
         return
 
     model_artifact = joblib.load(model_path)
-    sell_artifact = joblib.load(sell_model_path)
     threshold = model_artifact["threshold"]
     print(f"     Modelo:    {model_path} (th: {threshold})")
+    
+    # Determinar MT5 timeframe
+    mt5_tf = mt5.TIMEFRAME_H4 if tf == "4h" else mt5.TIMEFRAME_D1
+    magic_num = 202604 if tf == "4h" else 202602 # Magic frames separados
 
     # 3. Escanear pares
     print(f"\n  [3/3] Escaneando pares...")
     pairs_to_scan = {only_pair: MT5_PAIRS[only_pair]} if only_pair else MT5_PAIRS
     signals_found = []
 
+    cluster_counts = {}
+    cluster_risk = {}
+    MAX_PER_CLUSTER = 2
+    MAX_CLUSTER_RISK_PCT = 0.015
+
     for pair, config in pairs_to_scan.items():
         symbol = config["symbol"]
         print(f"\n  ── {pair} ", end="", flush=True)
 
         # Verificar si ya hay posición abierta del bot para este par
-        existing = [p for p in get_current_positions(symbol) if p.magic == 202602]
+        existing = [p for p in get_current_positions(symbol) if p.magic == magic_num]
         if existing:
             print(f"⏩ Ya hay posición abierta (#{existing[0].ticket})")
             continue
 
         # Obtener datos de MT5
-        df = get_mt5_data(symbol, mt5.TIMEFRAME_D1, 120)
+        df = get_mt5_data(symbol, mt5_tf, 120)
         if df is None or len(df) < 60:
             print(f"❌ Sin datos suficientes")
             continue
 
         # Generar señal
-        result = generate_mt5_signal(df, model_artifact, sell_artifact)
+        result = generate_mt5_signal(df, model_artifact)
         if result is None:
             print(f"❌ Error generando señal")
             continue
@@ -411,7 +433,15 @@ def run_mt5_scanner(model_path="model_multi.joblib",
             print(f"⏸️  HOLD (conf: {result['confidence']:.1%})")
             continue
 
-        # Calcular niveles
+        base_curr = pair[:3]
+        quote_curr = pair[3:]
+        
+        # 1. Cluster Count Checks
+        if cluster_counts.get(base_curr, 0) >= MAX_PER_CLUSTER or cluster_counts.get(quote_curr, 0) >= MAX_PER_CLUSTER:
+            print(f"❌ Rechazada por límite de clúster (Máx {MAX_PER_CLUSTER} para {base_curr}/{quote_curr})")
+            continue
+
+        # Calcular niveles y sizing
         atr = result["atr"]
         pip = config["pip"]
         sl_distance = atr
@@ -431,7 +461,31 @@ def run_mt5_scanner(model_path="model_multi.joblib",
             tp = entry - tp_distance
 
         sl_pips = sl_distance / pip
-        vol = round((balance * risk_pct) / (sl_pips * 10), 2)
+        
+        base_risk_pct = risk_pct
+        max_risk_pct = 0.01
+        alpha = 0.5
+        
+        confidence = result["confidence"]
+        if confidence > threshold:
+            scaled_risk = base_risk_pct * ((confidence - threshold) / (1.0 - threshold)) * alpha + base_risk_pct
+        else:
+            scaled_risk = base_risk_pct
+            
+        adjusted_risk_pct = min(scaled_risk, max_risk_pct)
+        
+        # 2. Cluster Risk Checks
+        if cluster_risk.get(base_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT or cluster_risk.get(quote_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT:
+             print(f"❌ Rechazada por riesgo correlacionado (>{MAX_CLUSTER_RISK_PCT*100}% {base_curr}/{quote_curr})")
+             continue
+             
+        # Update clusters
+        cluster_counts[base_curr] = cluster_counts.get(base_curr, 0) + 1
+        cluster_counts[quote_curr] = cluster_counts.get(quote_curr, 0) + 1
+        cluster_risk[base_curr] = cluster_risk.get(base_curr, 0) + adjusted_risk_pct
+        cluster_risk[quote_curr] = cluster_risk.get(quote_curr, 0) + adjusted_risk_pct
+
+        vol = round((balance * adjusted_risk_pct) / (sl_pips * 10), 2)
         vol = max(0.01, min(vol, 10.0))
 
         emoji = "🟢 BUY " if signal == "BUY" else "🔴 SELL"
@@ -468,7 +522,7 @@ def run_mt5_scanner(model_path="model_multi.joblib",
         # Ejecutar si no es scan-only
         if not scan_only:
             print(f"  → Ejecutando orden...")
-            open_trade_mt5(symbol, signal, atr, config, risk_pct, rr_ratio)
+            open_trade_mt5(symbol, signal, atr, config, risk_pct, rr_ratio, tf)
 
     # Resumen
     print(f"\n{'═'*70}")
@@ -492,8 +546,8 @@ def run_mt5_scanner(model_path="model_multi.joblib",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MT5 Auto-Trader")
-    parser.add_argument("--model", default="model_multi.joblib", help="Modelo principal")
-    parser.add_argument("--sell-model", default="model_multi_sell.joblib", help="Modelo SELL")
+    parser.add_argument("--tf", type=str, default="1d", choices=["1d", "4h"], help="Timeframe (1d o 4h)")
+    parser.add_argument("--model", default=None, help="Modelo principal (opcional, se autoasigna por tf)")
     parser.add_argument("--balance", type=float, default=None, help="Override balance")
     parser.add_argument("--risk", type=float, default=0.005, help="Riesgo %% (default 0.5%%)")
     parser.add_argument("--rr", type=float, default=1.5, help="R:R ratio")
@@ -505,11 +559,11 @@ if __name__ == "__main__":
 
     run_mt5_scanner(
         model_path=args.model,
-        sell_model_path=args.sell_model,
         balance_override=args.balance,
         risk_pct=args.risk,
         rr_ratio=args.rr,
         scan_only=args.scan_only,
         only_pair=args.pair,
         close_all=args.close_all,
+        tf=args.tf,
     )

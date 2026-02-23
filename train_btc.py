@@ -15,6 +15,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.calibration import CalibratedClassifierCV
 
 from features import create_features
 from fractals import detect_fractals
@@ -114,7 +115,7 @@ def train_btc_daily():
         X_te = X_all[train_end:test_end]
         y_te = y_all[train_end:test_end]
 
-        model = GradientBoostingClassifier(
+        base_model = GradientBoostingClassifier(
             n_estimators=200,
             max_depth=5,
             learning_rate=0.1,
@@ -122,6 +123,7 @@ def train_btc_daily():
             subsample=0.8,
             random_state=42,
         )
+        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
         model.fit(X_tr, y_tr)
 
         y_pred = model.predict(X_te)
@@ -168,7 +170,7 @@ def train_btc_daily():
     print(f"\n🏋️ Entrenando modelos finales con {total} velas...")
 
     # Modelo principal (multiclass)
-    main_model = GradientBoostingClassifier(
+    main_base = GradientBoostingClassifier(
         n_estimators=300,
         max_depth=5,
         learning_rate=0.1,
@@ -176,6 +178,7 @@ def train_btc_daily():
         subsample=0.8,
         random_state=42,
     )
+    main_model = CalibratedClassifierCV(main_base, method='isotonic', cv=3)
     main_model.fit(X_all, y_all)
 
     joblib.dump({
@@ -187,7 +190,7 @@ def train_btc_daily():
 
     # Modelo SELL (binario)
     y_sell = (df_work["target"] == 2).astype(int).values
-    sell_model = GradientBoostingClassifier(
+    sell_base = GradientBoostingClassifier(
         n_estimators=300,
         max_depth=5,
         learning_rate=0.1,
@@ -195,6 +198,7 @@ def train_btc_daily():
         subsample=0.8,
         random_state=42,
     )
+    sell_model = CalibratedClassifierCV(sell_base, method='isotonic', cv=3)
     sell_model.fit(X_all, y_sell)
 
     joblib.dump({
@@ -205,7 +209,8 @@ def train_btc_daily():
     print(f"  💾 Modelo SELL guardado: model_btc_daily_sell.joblib")
 
     # Feature importance
-    importances = pd.Series(main_model.feature_importances_, index=feature_cols)
+    importances_array = np.mean([clf.estimator.feature_importances_ for clf in main_model.calibrated_classifiers_], axis=0)
+    importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\n📊 Top 10 features (BTC Daily):")
     for feat, imp in importances.head(10).items():
