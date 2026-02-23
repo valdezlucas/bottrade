@@ -888,12 +888,14 @@ def run_monitor_loop():
                     # Notificar cierre
                     emoji = "🎯 TP" if hit == "TP" else "🛑 SL"
                     flag = PAIR_FLAGS.get(pair, "💱")
+                    entry_str = str(s['entry']).replace('.', '\\.')
+                    curr_str = str(curr).replace('.', '\\.')
                     msg = (
                         f"🏁 *OPERACIÓN CERRADA* — {pair}\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"{flag} *Cierre:* {emoji}\n"
-                        f"📍 *Entrada:* `{str(s['entry']).replace('.', '\\.')}`\n"
-                        f"🏁 *Salida:*  `{str(curr).replace('.', '\\.')}`\n"
+                        f"📍 *Entrada:* `{entry_str}`\n"
+                        f"🏁 *Salida:*  `{curr_str}`\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"{'✅ PROFIT' if hit == 'TP' else '❌ LOSS'}\n"
                     )
