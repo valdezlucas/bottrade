@@ -96,6 +96,14 @@ def get_binance_extremes():
         print(f"Error fetching Binance: {e}")
         return []
         
+    if isinstance(data, dict) and 'msg' in data:
+        print(f"Binance API Error: {data}")
+        return []
+        
+    if not isinstance(data, list):
+        print(f"Unexpected Binance response format: type={type(data)}")
+        return []
+        
     extremes = []
     for item in data:
         symbol = item['symbol']
@@ -152,9 +160,12 @@ def run_scan_job():
         threshold = art["threshold"]
     except Exception as e:
         print(f"❌ Error al cargar modelo: {e}")
-        return
+        return []
 
     extremes = get_binance_extremes()
+    if not extremes:
+        print("❌ No se pudieron obtener extremos de Binance (Posible bloqueo de IP).")
+        return []
     print(f"🔥 Encontrados {len(extremes)} pares con > {MIN_VOLATILITY_PCT}% volatilidad y liquidez.")
     
 
