@@ -82,7 +82,12 @@ def download_live_data(ticker, lookback_days=120):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    df = df.reset_index(drop=True)
+    df = df.reset_index()
+    if "Date" in df.columns:
+        df = df.rename(columns={"Date": "Datetime"})
+    elif "index" in df.columns:
+        df = df.rename(columns={"index": "Datetime"})
+
     df = df.rename(columns={"Adj Close": "Close"}) if "Adj Close" in df.columns else df
 
     # Ensure standard column names

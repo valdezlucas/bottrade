@@ -256,7 +256,11 @@ def download_data(ticker, days=120, interval="1d"):
         return None
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    df = df.reset_index(drop=True)
+    df = df.reset_index()
+    if "Date" in df.columns:
+        df = df.rename(columns={"Date": "Datetime"})
+    elif "index" in df.columns:
+        df = df.rename(columns={"index": "Datetime"})
     return df if all(c in df.columns for c in ["Open", "High", "Low", "Close"]) else None
 
 
