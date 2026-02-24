@@ -10,14 +10,15 @@ Uso:
     python dashboard.py --close 3 SL    # Cerrar trade #3 por SL
     python dashboard.py --stats         # Ver estadísticas
 """
+
 import argparse
-import sys
-import os
 import csv
+import os
+import sys
 from datetime import datetime
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -61,7 +62,9 @@ def show_dashboard():
     # Trades abiertos
     if not open_trades.empty:
         print(f"\n  🔓 TRADES ABIERTOS ({len(open_trades)})")
-        print(f"  {'#':<4} {'Fecha':<12} {'Par':<8} {'Señal':<6} {'Entry':>10} {'SL':>10} {'TP':>10} {'Risk$':>8}")
+        print(
+            f"  {'#':<4} {'Fecha':<12} {'Par':<8} {'Señal':<6} {'Entry':>10} {'SL':>10} {'TP':>10} {'Risk$':>8}"
+        )
         print(f"  {'-'*68}")
 
         for idx, row in open_trades.iterrows():
@@ -71,7 +74,9 @@ def show_dashboard():
             sl = f"{row['sl']:.5f}" if pd.notna(row["sl"]) else "—"
             tp = f"{row['tp']:.5f}" if pd.notna(row["tp"]) else "—"
             risk = f"${row['risk_usd']:.0f}" if pd.notna(row["risk_usd"]) else "—"
-            print(f"  {idx:<4} {date_str:<12} {row['pair']:<8} {emoji}{row['signal']:<5} {entry:>10} {sl:>10} {tp:>10} {risk:>8}")
+            print(
+                f"  {idx:<4} {date_str:<12} {row['pair']:<8} {emoji}{row['signal']:<5} {entry:>10} {sl:>10} {tp:>10} {risk:>8}"
+            )
 
         print(f"\n  Para cerrar: python dashboard.py --close <#> TP|SL")
     else:
@@ -80,7 +85,9 @@ def show_dashboard():
     # Trades cerrados
     if not closed_trades.empty:
         print(f"\n  📜 TRADES CERRADOS ({len(closed_trades)})")
-        print(f"  {'#':<4} {'Fecha':<12} {'Par':<8} {'Señal':<6} {'Result':<6} {'PnL':>10}")
+        print(
+            f"  {'#':<4} {'Fecha':<12} {'Par':<8} {'Señal':<6} {'Result':<6} {'PnL':>10}"
+        )
         print(f"  {'-'*50}")
 
         total_pnl = 0
@@ -90,7 +97,9 @@ def show_dashboard():
             pnl = row["pnl_usd"] if pd.notna(row["pnl_usd"]) else 0
             total_pnl += pnl
             pnl_str = f"${pnl:+.2f}" if pnl != 0 else "—"
-            print(f"  {idx:<4} {date_str:<12} {row['pair']:<8} {row['signal']:<6} {emoji}{row['status']:<5} {pnl_str:>10}")
+            print(
+                f"  {idx:<4} {date_str:<12} {row['pair']:<8} {row['signal']:<6} {emoji}{row['status']:<5} {pnl_str:>10}"
+            )
 
         print(f"\n  ─────────────────────────")
         color = "📈" if total_pnl >= 0 else "📉"
@@ -156,10 +165,14 @@ def show_stats():
 
     if pair_stats:
         print(f"\n  Por par:")
-        for pair, ps in sorted(pair_stats.items(), key=lambda x: x[1]["pnl"], reverse=True):
+        for pair, ps in sorted(
+            pair_stats.items(), key=lambda x: x[1]["pnl"], reverse=True
+        ):
             wr_p = ps["wins"] / ps["n"] if ps["n"] > 0 else 0
             emoji = "📈" if ps["pnl"] >= 0 else "📉"
-            print(f"    {emoji} {pair}: {ps['n']} trades, {wr_p:.0%} WR, ${ps['pnl']:+.2f}")
+            print(
+                f"    {emoji} {pair}: {ps['n']} trades, {wr_p:.0%} WR, ${ps['pnl']:+.2f}"
+            )
 
 
 def close_trade(trade_idx, result):
@@ -209,13 +222,19 @@ def close_trade(trade_idx, result):
     df.to_csv(JOURNAL_FILE, index=False)
 
     emoji = "✅" if status == "WIN" else "❌" if status == "LOSS" else "➖"
-    print(f"\n  {emoji} Trade #{trade_idx} cerrado: {row['pair']} {row['signal']} → {status} (${pnl:+.2f})")
+    print(
+        f"\n  {emoji} Trade #{trade_idx} cerrado: {row['pair']} {row['signal']} → {status} (${pnl:+.2f})"
+    )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Paper Trading Dashboard")
-    parser.add_argument("--close", nargs=2, metavar=("TRADE_ID", "RESULT"),
-                        help="Cerrar trade (ej: --close 3 TP)")
+    parser.add_argument(
+        "--close",
+        nargs=2,
+        metavar=("TRADE_ID", "RESULT"),
+        help="Cerrar trade (ej: --close 3 TP)",
+    )
     parser.add_argument("--stats", action="store_true", help="Ver estadísticas")
 
     args = parser.parse_args()

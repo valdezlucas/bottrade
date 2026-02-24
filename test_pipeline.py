@@ -2,10 +2,12 @@
 Test end-to-end del pipeline con datos sintéticos.
 Genera un CSV con datos OHLCV simulados y corre el entrenamiento completo.
 """
+
+import os
+import sys
+
 import numpy as np
 import pandas as pd
-import sys
-import os
 
 # Fijar encoding para Windows
 if sys.platform == "win32":
@@ -27,13 +29,15 @@ def generate_synthetic_ohlcv(n_rows=2000, seed=42):
     open_price = close + np.random.normal(0, 0.002, n_rows)
     volume = np.random.randint(100, 10000, n_rows)
 
-    df = pd.DataFrame({
-        "Open": open_price,
-        "High": high,
-        "Low": low,
-        "Close": close,
-        "Volume": volume,
-    })
+    df = pd.DataFrame(
+        {
+            "Open": open_price,
+            "High": high,
+            "Low": low,
+            "Close": close,
+            "Volume": volume,
+        }
+    )
 
     return df
 
@@ -53,13 +57,14 @@ if __name__ == "__main__":
     # 2. Preparar dataset
     print("\n[2/4] Preparando dataset (features + fractales + labels)...")
     from train import prepare_dataset
+
     df_prepared = prepare_dataset(csv_path)
     print(f"      Dataset listo: {len(df_prepared)} filas")
 
     # 3. Walk-forward validation
     print("\n[3/4] Ejecutando walk-forward validation...")
-    from train import walk_forward_train
     from costs import TradingCosts
+    from train import walk_forward_train
 
     costs = TradingCosts(spread_pips=1.5, max_slippage_pips=1.0)
     fold_results = walk_forward_train(df_prepared, n_folds=4, costs=costs)
@@ -79,6 +84,7 @@ if __name__ == "__main__":
     # 5. Verificar prediccion
     print("\n[5/5] Verificando prediccion...")
     from predict import predict as run_predict
+
     signals, _ = run_predict(csv_path, model_path="test_model.joblib")
 
     print("\n" + "=" * 60)

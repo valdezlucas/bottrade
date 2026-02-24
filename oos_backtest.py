@@ -6,29 +6,38 @@ Entrena con datos hasta 2022, backtestea en 2023-2026 (datos que el modelo NUNCA
 Uso:
     python oos_backtest.py --data NZDUSD_daily_2016_2026.csv --split-year 2023
 """
+
 import argparse
 import sys
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
-from features import create_features
-from fractals import detect_fractals
-from ml_dataset import label_data
-from train import get_feature_columns, walk_forward_train, EXCLUDE_COLS
-from costs import TradingCosts
-from backtest import run_backtest
-
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
 
+from backtest import run_backtest
+from costs import TradingCosts
+from features import create_features
+from fractals import detect_fractals
+from ml_dataset import label_data
+from train import EXCLUDE_COLS, get_feature_columns, walk_forward_train
 
-def run_oos_backtest(data_path, split_year=2023, spread_pips=1.5, rr=1.5,
-                     lookahead=20, risk_per_trade=0.005, initial_balance=10000,
-                     max_drawdown_pct=20.0):
+
+def run_oos_backtest(
+    data_path,
+    split_year=2023,
+    spread_pips=1.5,
+    rr=1.5,
+    lookahead=20,
+    risk_per_trade=0.005,
+    initial_balance=10000,
+    max_drawdown_pct=20.0,
+):
     """
     Pipeline completo de Out-of-Sample backtest.
 
@@ -68,7 +77,9 @@ def run_oos_backtest(data_path, split_year=2023, spread_pips=1.5, rr=1.5,
         df_raw["_date"] = dates[:total_rows]
 
     print(f"   Datos totales: {len(df_raw)} velas")
-    print(f"   Rango: {df_raw['_date'].iloc[0].date()} → {df_raw['_date'].iloc[-1].date()}")
+    print(
+        f"   Rango: {df_raw['_date'].iloc[0].date()} → {df_raw['_date'].iloc[-1].date()}"
+    )
 
     # --- 2. Split temporal ---
     split_date = pd.Timestamp(f"{split_year}-01-01")
@@ -79,8 +90,12 @@ def run_oos_backtest(data_path, split_year=2023, spread_pips=1.5, rr=1.5,
     df_test_raw = df_raw[mask_test].copy().reset_index(drop=True)
 
     print(f"\n[2/5] Split temporal:")
-    print(f"   Train: {len(df_train_raw)} velas ({df_train_raw['_date'].iloc[0].date()} → {df_train_raw['_date'].iloc[-1].date()})")
-    print(f"   Test:  {len(df_test_raw)} velas ({df_test_raw['_date'].iloc[0].date()} → {df_test_raw['_date'].iloc[-1].date()})")
+    print(
+        f"   Train: {len(df_train_raw)} velas ({df_train_raw['_date'].iloc[0].date()} → {df_train_raw['_date'].iloc[-1].date()})"
+    )
+    print(
+        f"   Test:  {len(df_test_raw)} velas ({df_test_raw['_date'].iloc[0].date()} → {df_test_raw['_date'].iloc[-1].date()})"
+    )
 
     # --- 3. Preparar datasets ---
     print(f"\n[3/5] Preparando features y labels...")
@@ -207,6 +222,7 @@ def run_oos_backtest(data_path, split_year=2023, spread_pips=1.5, rr=1.5,
 
     # Limpiar temp
     import os
+
     if os.path.exists(test_csv):
         os.remove(test_csv)
 
@@ -229,9 +245,13 @@ def run_oos_backtest(data_path, split_year=2023, spread_pips=1.5, rr=1.5,
         print(f"{'Sharpe Ratio':<25} {'':>15} {oos['sharpe_ratio']:>15.4f}")
 
         if oos["expectancy"] > 0:
-            print(f"\n  [OK] El modelo mantiene expectancy positiva en datos NUNCA vistos")
+            print(
+                f"\n  [OK] El modelo mantiene expectancy positiva en datos NUNCA vistos"
+            )
         else:
-            print(f"\n  [X]  El modelo pierde expectancy en datos nuevos — posible overfitting")
+            print(
+                f"\n  [X]  El modelo pierde expectancy en datos nuevos — posible overfitting"
+            )
 
         if oos["profit_factor"] > 1.0:
             print(f"  [OK] Profit Factor > 1.0 out-of-sample")
@@ -244,12 +264,18 @@ def run_oos_backtest(data_path, split_year=2023, spread_pips=1.5, rr=1.5,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Out-of-Sample Backtest")
     parser.add_argument("--data", required=True, help="CSV con datos OHLC")
-    parser.add_argument("--split-year", type=int, default=2023, help="Anio de corte (default: 2023)")
+    parser.add_argument(
+        "--split-year", type=int, default=2023, help="Anio de corte (default: 2023)"
+    )
     parser.add_argument("--spread", type=float, default=1.5, help="Spread en pips")
     parser.add_argument("--rr", type=float, default=1.5, help="R:R ratio")
     parser.add_argument("--balance", type=float, default=10000, help="Capital inicial")
-    parser.add_argument("--risk", type=float, default=0.005, help="Riesgo por trade (default: 0.5%)")
-    parser.add_argument("--max-dd", type=float, default=20.0, help="Max drawdown %% (default: 20)")
+    parser.add_argument(
+        "--risk", type=float, default=0.005, help="Riesgo por trade (default: 0.5%)"
+    )
+    parser.add_argument(
+        "--max-dd", type=float, default=20.0, help="Max drawdown %% (default: 20)"
+    )
 
     args = parser.parse_args()
 

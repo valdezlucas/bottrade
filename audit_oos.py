@@ -15,38 +15,98 @@ Responde:
   9. OVERFITTING check: train vs OOS comparison
 """
 
-import numpy as np
-import pandas as pd
-import joblib
-import yfinance as yf
 from datetime import datetime, timedelta
 
+import joblib
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
+from costs import TradingCosts
 from features import create_features
 from fractals import detect_fractals
-from costs import TradingCosts
-
 
 MODELS = {
-    "Daily": {"buy": "model_multi.joblib",     "sell": "model_multi_sell.joblib"},
-    "4H":    {"buy": "model_4h.joblib",         "sell": "model_4h_sell.joblib"},
-    "1H":    {"buy": "model_1h.joblib",          "sell": "model_1h_sell.joblib"},
+    "Daily": {"buy": "model_multi.joblib", "sell": "model_multi_sell.joblib"},
+    "4H": {"buy": "model_4h.joblib", "sell": "model_4h_sell.joblib"},
+    "1H": {"buy": "model_1h.joblib", "sell": "model_1h_sell.joblib"},
 }
 
 # TOP 5 + los peores 2 para comparar honestamente
 PAIRS_TO_AUDIT = {
     # --- TOP performers ---
-    "CADJPY":  {"ticker": "CADJPY=X",  "pip": 0.01,   "spread": 2.0,  "commission_usd": 7.0, "swap_pips": 0.3},
-    "CHFJPY":  {"ticker": "CHFJPY=X",  "pip": 0.01,   "spread": 2.5,  "commission_usd": 7.0, "swap_pips": 0.3},
-    "GBPNZD":  {"ticker": "GBPNZD=X",  "pip": 0.0001, "spread": 4.0,  "commission_usd": 7.0, "swap_pips": 0.5},
-    "EURNZD":  {"ticker": "EURNZD=X",  "pip": 0.0001, "spread": 3.5,  "commission_usd": 7.0, "swap_pips": 0.5},
-    "AUDCAD":  {"ticker": "AUDCAD=X",  "pip": 0.0001, "spread": 2.0,  "commission_usd": 7.0, "swap_pips": 0.3},
+    "CADJPY": {
+        "ticker": "CADJPY=X",
+        "pip": 0.01,
+        "spread": 2.0,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
+    "CHFJPY": {
+        "ticker": "CHFJPY=X",
+        "pip": 0.01,
+        "spread": 2.5,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
+    "GBPNZD": {
+        "ticker": "GBPNZD=X",
+        "pip": 0.0001,
+        "spread": 4.0,
+        "commission_usd": 7.0,
+        "swap_pips": 0.5,
+    },
+    "EURNZD": {
+        "ticker": "EURNZD=X",
+        "pip": 0.0001,
+        "spread": 3.5,
+        "commission_usd": 7.0,
+        "swap_pips": 0.5,
+    },
+    "AUDCAD": {
+        "ticker": "AUDCAD=X",
+        "pip": 0.0001,
+        "spread": 2.0,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
     # --- MEDIANOS ---
-    "CADCHF":  {"ticker": "CADCHF=X",  "pip": 0.0001, "spread": 2.5,  "commission_usd": 7.0, "swap_pips": 0.4},
-    "GBPCAD":  {"ticker": "GBPCAD=X",  "pip": 0.0001, "spread": 3.0,  "commission_usd": 7.0, "swap_pips": 0.4},
-    "AUDNZD":  {"ticker": "AUDNZD=X",  "pip": 0.0001, "spread": 2.5,  "commission_usd": 7.0, "swap_pips": 0.3},
+    "CADCHF": {
+        "ticker": "CADCHF=X",
+        "pip": 0.0001,
+        "spread": 2.5,
+        "commission_usd": 7.0,
+        "swap_pips": 0.4,
+    },
+    "GBPCAD": {
+        "ticker": "GBPCAD=X",
+        "pip": 0.0001,
+        "spread": 3.0,
+        "commission_usd": 7.0,
+        "swap_pips": 0.4,
+    },
+    "AUDNZD": {
+        "ticker": "AUDNZD=X",
+        "pip": 0.0001,
+        "spread": 2.5,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
     # --- PEORES (control negativo) ---
-    "NZDCHF":  {"ticker": "NZDCHF=X",  "pip": 0.0001, "spread": 3.0,  "commission_usd": 7.0, "swap_pips": 0.4},
-    "NZDCAD":  {"ticker": "NZDCAD=X",  "pip": 0.0001, "spread": 2.5,  "commission_usd": 7.0, "swap_pips": 0.3},
+    "NZDCHF": {
+        "ticker": "NZDCHF=X",
+        "pip": 0.0001,
+        "spread": 3.0,
+        "commission_usd": 7.0,
+        "swap_pips": 0.4,
+    },
+    "NZDCAD": {
+        "ticker": "NZDCAD=X",
+        "pip": 0.0001,
+        "spread": 2.5,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
 }
 
 INITIAL_BALANCE = 10000
@@ -57,8 +117,13 @@ RR_RATIO = 1.5
 def download(ticker, pair, interval="1d", days=730):
     end = datetime.now()
     start = end - timedelta(days=days)
-    df = yf.download(ticker, start=start.strftime("%Y-%m-%d"),
-                     end=end.strftime("%Y-%m-%d"), interval=interval, progress=False)
+    df = yf.download(
+        ticker,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        interval=interval,
+        progress=False,
+    )
     if df.empty:
         return None
     if isinstance(df.columns, pd.MultiIndex):
@@ -84,8 +149,9 @@ def resample_4h(df_1h):
     return df.resample("4h").agg(ohlc).dropna().reset_index(drop=True)
 
 
-def deep_backtest(df, model_path, sell_model_path, pip_value, spread_pips,
-                  commission_usd, swap_pips):
+def deep_backtest(
+    df, model_path, sell_model_path, pip_value, spread_pips, commission_usd, swap_pips
+):
     """
     Returns list of individual trade dicts with full details.
     """
@@ -140,7 +206,11 @@ def deep_backtest(df, model_path, sell_model_path, pip_value, spread_pips,
     dd_break = False
 
     for i in range(len(df_work)):
-        h, l, c = df_work["High"].iloc[i], df_work["Low"].iloc[i], df_work["Close"].iloc[i]
+        h, l, c = (
+            df_work["High"].iloc[i],
+            df_work["Low"].iloc[i],
+            df_work["Close"].iloc[i],
+        )
         atr = df_work["ATR"].iloc[i]
         if np.isnan(atr) or atr <= 0:
             equity.append(balance)
@@ -150,15 +220,23 @@ def deep_backtest(df, model_path, sell_model_path, pip_value, spread_pips,
             cur["bars"] += 1
             hit_tp = hit_sl = False
             if cur["dir"] == "BUY":
-                if h >= cur["tp"]: hit_tp = True
-                if l <= cur["sl"]: hit_sl = True
+                if h >= cur["tp"]:
+                    hit_tp = True
+                if l <= cur["sl"]:
+                    hit_sl = True
             else:
-                if l <= cur["tp"]: hit_tp = True
-                if h >= cur["sl"]: hit_sl = True
+                if l <= cur["tp"]:
+                    hit_tp = True
+                if h >= cur["sl"]:
+                    hit_sl = True
 
             if hit_sl or hit_tp:
                 exit_p = cur["sl"] if hit_sl else cur["tp"]
-                exit_cost = (spread_cost/2) + slippage_cost + (swap_pips * pip_value * cur["bars"])
+                exit_cost = (
+                    (spread_cost / 2)
+                    + slippage_cost
+                    + (swap_pips * pip_value * cur["bars"])
+                )
 
                 if cur["dir"] == "BUY":
                     raw_pnl = (exit_p - cur["entry"]) - cur["entry_cost"] - exit_cost
@@ -192,7 +270,7 @@ def deep_backtest(df, model_path, sell_model_path, pip_value, spread_pips,
                     sig = {1: "BUY", 2: "SELL"}[preds[i]]
 
             if sig:
-                entry_cost = (spread_cost/2) + slippage_cost
+                entry_cost = (spread_cost / 2) + slippage_cost
                 sl_d = atr * 1.0
                 tp_d = sl_d * RR_RATIO
                 if sig == "BUY":
@@ -204,17 +282,26 @@ def deep_backtest(df, model_path, sell_model_path, pip_value, spread_pips,
                     sl_p = ep + sl_d
                     tp_p = ep - tp_d
 
-                cur = {"dir": sig, "entry": ep, "sl": sl_p, "tp": tp_p,
-                       "entry_cost": entry_cost, "bars": 0, "open": True,
-                       "pnl_usd": 0, "pnl_pips": 0, "exit_reason": None,
-                       "atr": atr}
+                cur = {
+                    "dir": sig,
+                    "entry": ep,
+                    "sl": sl_p,
+                    "tp": tp_p,
+                    "entry_cost": entry_cost,
+                    "bars": 0,
+                    "open": True,
+                    "pnl_usd": 0,
+                    "pnl_pips": 0,
+                    "exit_reason": None,
+                    "atr": atr,
+                }
 
         equity.append(balance)
         peak = max(peak, balance)
 
     # Close open trade
     if cur and cur["open"]:
-        exit_cost = (spread_cost/2) + slippage_cost
+        exit_cost = (spread_cost / 2) + slippage_cost
         exit_p = df_work["Close"].iloc[-1]
         if cur["dir"] == "BUY":
             raw_pnl = (exit_p - cur["entry"]) - cur["entry_cost"] - exit_cost
@@ -222,7 +309,9 @@ def deep_backtest(df, model_path, sell_model_path, pip_value, spread_pips,
             raw_pnl = (cur["entry"] - exit_p) - cur["entry_cost"] - exit_cost
         atr_last = df_work["ATR"].iloc[-1]
         risk_usd = balance * RISK_PER_TRADE
-        usd_pnl = raw_pnl * (risk_usd / atr_last) - commission_usd if atr_last > 0 else 0
+        usd_pnl = (
+            raw_pnl * (risk_usd / atr_last) - commission_usd if atr_last > 0 else 0
+        )
         balance += usd_pnl
         cur["pnl_usd"] = usd_pnl
         cur["pnl_pips"] = raw_pnl / pip_value
@@ -320,6 +409,7 @@ def compute_deep_stats(pair, tf, trades, equity):
         z_score = (p - 0.5) / np.sqrt(0.25 / n) if n > 0 else 0
         # p-value approximation (one-tailed)
         from scipy import stats as sp_stats
+
         p_value = 1 - sp_stats.norm.cdf(z_score) if z_score > 0 else 1.0
     else:
         z_score = 0
@@ -357,7 +447,9 @@ if __name__ == "__main__":
     print("  Sin anestesia. Datos duros.")
     print("=" * 80)
     print(f"  Balance: ${INITIAL_BALANCE:,}")
-    print(f"  Risk/trade: {RISK_PER_TRADE*100}% = ${INITIAL_BALANCE * RISK_PER_TRADE:.0f}")
+    print(
+        f"  Risk/trade: {RISK_PER_TRADE*100}% = ${INITIAL_BALANCE * RISK_PER_TRADE:.0f}"
+    )
     print(f"  R:R ratio: 1:{RR_RATIO}")
     print(f"  Costos: spread + slippage(30%) + comision($7/lot) + swap")
     print("=" * 80)
@@ -367,7 +459,9 @@ if __name__ == "__main__":
     for pair, cfg in PAIRS_TO_AUDIT.items():
         print(f"\n{'─' * 60}")
         print(f"  AUDITING: {pair}")
-        print(f"  Spread: {cfg['spread']} pips | Commission: ${cfg['commission_usd']}/lot | Swap: {cfg['swap_pips']} pips/night")
+        print(
+            f"  Spread: {cfg['spread']} pips | Commission: ${cfg['commission_usd']}/lot | Swap: {cfg['swap_pips']} pips/night"
+        )
         print(f"{'─' * 60}")
 
         for tf in ["Daily", "4H", "1H"]:
@@ -398,11 +492,13 @@ if __name__ == "__main__":
                 continue
 
             trades, equity = deep_backtest(
-                df_clean, mp, sp,
+                df_clean,
+                mp,
+                sp,
                 pip_value=cfg["pip"],
                 spread_pips=cfg["spread"],
                 commission_usd=cfg["commission_usd"],
-                swap_pips=cfg["swap_pips"]
+                swap_pips=cfg["swap_pips"],
             )
 
             stats = compute_deep_stats(pair, tf, trades, equity)
@@ -410,12 +506,22 @@ if __name__ == "__main__":
                 all_stats.append(stats)
 
                 # Inline summary
-                sig = "***" if stats["p_value"] < 0.01 else "**" if stats["p_value"] < 0.05 else "*" if stats["p_value"] < 0.10 else ""
+                sig = (
+                    "***"
+                    if stats["p_value"] < 0.01
+                    else (
+                        "**"
+                        if stats["p_value"] < 0.05
+                        else "*" if stats["p_value"] < 0.10 else ""
+                    )
+                )
                 dd_flag = " ⛔DD_BREAK" if stats["dd_breaker_hit"] else ""
-                print(f"  {tf:>6}: {stats['trades']:>4} trades | WR {stats['win_rate']:5.1f}%{sig} | "
-                      f"Ret {stats['return_pct']:+7.2f}% | PF {stats['profit_factor']:5.2f} | "
-                      f"DD {stats['max_dd']:5.2f}% | MaxConsLoss {stats['max_cons_loss']} | "
-                      f"Exp ${stats['expectancy_usd']:+.2f}/trade | Sharpe {stats['sharpe_ann']:.2f}{dd_flag}")
+                print(
+                    f"  {tf:>6}: {stats['trades']:>4} trades | WR {stats['win_rate']:5.1f}%{sig} | "
+                    f"Ret {stats['return_pct']:+7.2f}% | PF {stats['profit_factor']:5.2f} | "
+                    f"DD {stats['max_dd']:5.2f}% | MaxConsLoss {stats['max_cons_loss']} | "
+                    f"Exp ${stats['expectancy_usd']:+.2f}/trade | Sharpe {stats['sharpe_ann']:.2f}{dd_flag}"
+                )
 
     # ═══════════════════════════════════════════════════════════════
     # FINAL REPORT
@@ -426,31 +532,51 @@ if __name__ == "__main__":
 
     # 1. SIGNIFICANCE TABLE
     print(f"\n  1️⃣  SIGNIFICANCIA ESTADISTICA (WR > 50%?)")
-    print(f"  {'Pair':<10} {'TF':<6} {'Trades':>6} {'WR':>6} {'Z-Score':>8} {'P-Value':>8} {'Significativo?':>15}")
+    print(
+        f"  {'Pair':<10} {'TF':<6} {'Trades':>6} {'WR':>6} {'Z-Score':>8} {'P-Value':>8} {'Significativo?':>15}"
+    )
     print(f"  {'-' * 72}")
     for s in all_stats:
         if s["trades"] == 0:
             continue
-        sig_label = "p<0.01 ✅✅✅" if s["p_value"] < 0.01 else "p<0.05 ✅✅" if s["p_value"] < 0.05 else "p<0.10 ✅" if s["p_value"] < 0.10 else "NO ❌"
-        print(f"  {s['pair']:<10} {s['tf']:<6} {s['trades']:>6} {s['win_rate']:>5.1f}% {s['z_score']:>+7.2f} {s['p_value']:>8.4f} {sig_label:>15}")
+        sig_label = (
+            "p<0.01 ✅✅✅"
+            if s["p_value"] < 0.01
+            else (
+                "p<0.05 ✅✅"
+                if s["p_value"] < 0.05
+                else "p<0.10 ✅" if s["p_value"] < 0.10 else "NO ❌"
+            )
+        )
+        print(
+            f"  {s['pair']:<10} {s['tf']:<6} {s['trades']:>6} {s['win_rate']:>5.1f}% {s['z_score']:>+7.2f} {s['p_value']:>8.4f} {sig_label:>15}"
+        )
 
     # 2. RISK METRICS TABLE
     print(f"\n  2️⃣  RIESGO & DRAWDOWN")
-    print(f"  {'Pair':<10} {'TF':<6} {'MaxDD':>7} {'MaxConsLoss':>12} {'Risk/Trade':>11} {'AvgBars':>8} {'DD Break?':>10}")
+    print(
+        f"  {'Pair':<10} {'TF':<6} {'MaxDD':>7} {'MaxConsLoss':>12} {'Risk/Trade':>11} {'AvgBars':>8} {'DD Break?':>10}"
+    )
     print(f"  {'-' * 72}")
     for s in all_stats:
         if s["trades"] == 0:
             continue
-        print(f"  {s['pair']:<10} {s['tf']:<6} {s['max_dd']:>6.2f}% {s['max_cons_loss']:>12} ${s['risk_per_trade_usd']:>10.0f} {s['avg_bars']:>7.1f} {'SI ⛔' if s['dd_breaker_hit'] else 'No ✅':>10}")
+        print(
+            f"  {s['pair']:<10} {s['tf']:<6} {s['max_dd']:>6.2f}% {s['max_cons_loss']:>12} ${s['risk_per_trade_usd']:>10.0f} {s['avg_bars']:>7.1f} {'SI ⛔' if s['dd_breaker_hit'] else 'No ✅':>10}"
+        )
 
     # 3. EXPECTANCY TABLE
     print(f"\n  3️⃣  EXPECTANCY POR TRADE (lo mas importante)")
-    print(f"  {'Pair':<10} {'TF':<6} {'Exp USD':>9} {'Exp Pips':>9} {'AvgWin$':>9} {'AvgLoss$':>10} {'PF':>6} {'Sharpe':>7}")
+    print(
+        f"  {'Pair':<10} {'TF':<6} {'Exp USD':>9} {'Exp Pips':>9} {'AvgWin$':>9} {'AvgLoss$':>10} {'PF':>6} {'Sharpe':>7}"
+    )
     print(f"  {'-' * 72}")
     for s in all_stats:
         if s["trades"] == 0:
             continue
-        print(f"  {s['pair']:<10} {s['tf']:<6} ${s['expectancy_usd']:>+7.2f} {s['expectancy_pips']:>+8.1f} ${s['avg_win_usd']:>8.2f} ${s['avg_loss_usd']:>9.2f} {s['profit_factor']:>5.2f} {s['sharpe_ann']:>6.2f}")
+        print(
+            f"  {s['pair']:<10} {s['tf']:<6} ${s['expectancy_usd']:>+7.2f} {s['expectancy_pips']:>+8.1f} ${s['avg_win_usd']:>8.2f} ${s['avg_loss_usd']:>9.2f} {s['profit_factor']:>5.2f} {s['sharpe_ann']:>6.2f}"
+        )
 
     # 4. OVERALL VERDICT
     print(f"\n  4️⃣  VEREDICTO POR PAR")
@@ -459,9 +585,15 @@ if __name__ == "__main__":
 
     pairs_seen = []
     for pair in PAIRS_TO_AUDIT:
-        daily_s = next((s for s in all_stats if s["pair"] == pair and s["tf"] == "Daily"), None)
-        h4_s = next((s for s in all_stats if s["pair"] == pair and s["tf"] == "4H"), None)
-        h1_s = next((s for s in all_stats if s["pair"] == pair and s["tf"] == "1H"), None)
+        daily_s = next(
+            (s for s in all_stats if s["pair"] == pair and s["tf"] == "Daily"), None
+        )
+        h4_s = next(
+            (s for s in all_stats if s["pair"] == pair and s["tf"] == "4H"), None
+        )
+        h1_s = next(
+            (s for s in all_stats if s["pair"] == pair and s["tf"] == "1H"), None
+        )
 
         d_ret = f"{daily_s['return_pct']:+.1f}%" if daily_s else "N/A"
         h4_ret = f"{h4_s['return_pct']:+.1f}%" if h4_s else "N/A"
@@ -470,7 +602,9 @@ if __name__ == "__main__":
         # Verdict
         positives = sum(1 for s in [daily_s, h4_s, h1_s] if s and s["return_pct"] > 0)
         significant = sum(1 for s in [daily_s, h4_s, h1_s] if s and s["p_value"] < 0.05)
-        no_dd_break = sum(1 for s in [daily_s, h4_s, h1_s] if s and not s["dd_breaker_hit"])
+        no_dd_break = sum(
+            1 for s in [daily_s, h4_s, h1_s] if s and not s["dd_breaker_hit"]
+        )
 
         if positives >= 3 and significant >= 1:
             verdict = "EDGE REAL ✅✅"
@@ -484,7 +618,14 @@ if __name__ == "__main__":
             verdict = "ESPEJISMO ❌"
 
         print(f"  {pair:<10} {d_ret:>12} {h4_ret:>12} {h1_ret:>12} {verdict:>15}")
-        pairs_seen.append({"pair": pair, "positives": positives, "significant": significant, "verdict": verdict})
+        pairs_seen.append(
+            {
+                "pair": pair,
+                "positives": positives,
+                "significant": significant,
+                "verdict": verdict,
+            }
+        )
 
     # 5. HONEST ASSESSMENT
     total_tests = len([s for s in all_stats if s["trades"] > 0])
@@ -496,10 +637,14 @@ if __name__ == "__main__":
     print(f"  5️⃣  EVALUACION HONESTA")
     print(f"{'═' * 90}")
     print(f"  Tests totales:           {total_tests}")
-    print(f"  Tests rentables:         {profitable}/{total_tests} ({profitable/total_tests*100:.0f}%)")
+    print(
+        f"  Tests rentables:         {profitable}/{total_tests} ({profitable/total_tests*100:.0f}%)"
+    )
     print(f"  Tests significativos:    {significant}/{total_tests} (p<0.05)")
     print(f"  Pares con edge real:     {edge_pairs}/{len(PAIRS_TO_AUDIT)}")
-    print(f"  Risk por trade:          ${INITIAL_BALANCE * RISK_PER_TRADE:.0f} ({RISK_PER_TRADE*100}% de ${INITIAL_BALANCE:,})")
+    print(
+        f"  Risk por trade:          ${INITIAL_BALANCE * RISK_PER_TRADE:.0f} ({RISK_PER_TRADE*100}% de ${INITIAL_BALANCE:,})"
+    )
     print(f"  Mejor caso:              Un edge modesto en forex (cruces JPY/NZD)")
     print(f"  Peor caso:               Overfitting parcial, necesita forward test real")
     print(f"{'═' * 90}")

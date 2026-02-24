@@ -14,26 +14,27 @@ Mejoras v3:
 Uso:
     python multi_pair_oos.py --split-year 2021
 """
+
 import argparse
-import sys
 import os
+import sys
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.metrics import classification_report
+
+from backtest import run_backtest
+from costs import TradingCosts
 from features import create_features
 from fractals import detect_fractals
 from ml_dataset import label_data
 from train import get_feature_columns
-from costs import TradingCosts
-from backtest import run_backtest
-
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.metrics import classification_report
-
 
 # Pares disponibles  (archivo, spread_pips, pip_value)
 PAIRS = {
@@ -43,14 +44,49 @@ PAIRS = {
     "AUDUSD": {"file": "AUDUSD_daily_2010_2026.csv", "spread": 1.2, "pip": 0.0001},
     "USDCAD": {"file": "USDCAD_daily_2010_2026.csv", "spread": 1.5, "pip": 0.0001},
     "USDCHF": {"file": "USDCHF_daily_2010_2026.csv", "spread": 1.5, "pip": 0.0001},
-    "USDJPY": {"file": "USDJPY_daily_2010_2026.csv", "spread": 1.2, "pip": 0.01, "skip_backtest": True},
+    "USDJPY": {
+        "file": "USDJPY_daily_2010_2026.csv",
+        "spread": 1.2,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
     "EURGBP": {"file": "EURGBP_daily_2010_2026.csv", "spread": 1.5, "pip": 0.0001},
-    "EURJPY": {"file": "EURJPY_daily_2010_2026.csv", "spread": 1.5, "pip": 0.01, "skip_backtest": True},
-    "GBPJPY": {"file": "GBPJPY_daily_2010_2026.csv", "spread": 2.0, "pip": 0.01, "skip_backtest": True},
-    "AUDJPY": {"file": "AUDJPY_daily_2010_2026.csv", "spread": 2.0, "pip": 0.01, "skip_backtest": True},
-    "CADJPY": {"file": "CADJPY_daily_2010_2026.csv", "spread": 2.0, "pip": 0.01, "skip_backtest": True},
-    "NZDJPY": {"file": "NZDJPY_daily_2010_2026.csv", "spread": 2.5, "pip": 0.01, "skip_backtest": True},
-    "CHFJPY": {"file": "CHFJPY_daily_2010_2026.csv", "spread": 2.5, "pip": 0.01, "skip_backtest": True},
+    "EURJPY": {
+        "file": "EURJPY_daily_2010_2026.csv",
+        "spread": 1.5,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
+    "GBPJPY": {
+        "file": "GBPJPY_daily_2010_2026.csv",
+        "spread": 2.0,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
+    "AUDJPY": {
+        "file": "AUDJPY_daily_2010_2026.csv",
+        "spread": 2.0,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
+    "CADJPY": {
+        "file": "CADJPY_daily_2010_2026.csv",
+        "spread": 2.0,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
+    "NZDJPY": {
+        "file": "NZDJPY_daily_2010_2026.csv",
+        "spread": 2.5,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
+    "CHFJPY": {
+        "file": "CHFJPY_daily_2010_2026.csv",
+        "spread": 2.5,
+        "pip": 0.01,
+        "skip_backtest": True,
+    },
     "EURAUD": {"file": "EURAUD_daily_2010_2026.csv", "spread": 2.0, "pip": 0.0001},
     "GBPAUD": {"file": "GBPAUD_daily_2010_2026.csv", "spread": 2.5, "pip": 0.0001},
     "EURNZD": {"file": "EURNZD_daily_2010_2026.csv", "spread": 3.0, "pip": 0.0001},
@@ -63,7 +99,12 @@ PAIRS = {
     "AUDCHF": {"file": "AUDCHF_daily_2010_2026.csv", "spread": 3.0, "pip": 0.0001},
     "CADCHF": {"file": "CADCHF_daily_2010_2026.csv", "spread": 3.0, "pip": 0.0001},
     "NZDCHF": {"file": "NZDCHF_daily_2010_2026.csv", "spread": 3.5, "pip": 0.0001},
-    "XAUUSD": {"file": "XAUUSD_daily_2010_2026.csv", "spread": 3.0, "pip": 0.1, "skip_backtest": True},
+    "XAUUSD": {
+        "file": "XAUUSD_daily_2010_2026.csv",
+        "spread": 3.0,
+        "pip": 0.1,
+        "skip_backtest": True,
+    },
 }
 
 
@@ -109,9 +150,14 @@ def prepare_pair_data(pair_name, config, split_year, lookahead=20, rr=1.5):
     return df_train_raw, df_test_raw
 
 
-def run_multi_pair_oos(split_year=2021, rr=1.5, lookahead=20,
-                       risk_per_trade=0.005, initial_balance=10000,
-                       max_drawdown_pct=25.0):
+def run_multi_pair_oos(
+    split_year=2021,
+    rr=1.5,
+    lookahead=20,
+    risk_per_trade=0.005,
+    initial_balance=10000,
+    max_drawdown_pct=25.0,
+):
     """
     Pipeline multi-par:
     1. Carga y prepara datos de 5 pares
@@ -243,7 +289,9 @@ def run_multi_pair_oos(split_year=2021, rr=1.5, lookahead=20,
                 best_exp = exp
                 best_th = th
 
-        fold_results.append({"fold": fold + 1, "best_th": best_th, "best_exp": best_exp})
+        fold_results.append(
+            {"fold": fold + 1, "best_th": best_th, "best_exp": best_exp}
+        )
 
         status = f"Exp: {best_exp:.6f} th={best_th}" if best_exp > -999 else "INVALID"
         print(f"  Fold {fold+1}: Train {len(df_tr)} | Test {len(df_te)} → {status}")
@@ -279,11 +327,14 @@ def run_multi_pair_oos(split_year=2021, rr=1.5, lookahead=20,
     main_model.fit(X_all, y_all)
 
     model_path = "model_multi.joblib"
-    joblib.dump({
-        "model": main_model,
-        "feature_columns": feature_cols,
-        "threshold": optimal_th,
-    }, model_path)
+    joblib.dump(
+        {
+            "model": main_model,
+            "feature_columns": feature_cols,
+            "threshold": optimal_th,
+        },
+        model_path,
+    )
 
     # Modelo SELL separado (binario)
     y_sell = (combined_train["target"] == 2).astype(int).values
@@ -298,11 +349,14 @@ def run_multi_pair_oos(split_year=2021, rr=1.5, lookahead=20,
     sell_model.fit(X_all, y_sell)
 
     sell_model_path = "model_multi_sell.joblib"
-    joblib.dump({
-        "model": sell_model,
-        "feature_columns": feature_cols,
-        "threshold": optimal_th,
-    }, sell_model_path)
+    joblib.dump(
+        {
+            "model": sell_model,
+            "feature_columns": feature_cols,
+            "threshold": optimal_th,
+        },
+        sell_model_path,
+    )
 
     n_sell = y_sell.sum()
     print(f"  Modelo principal: {model_path}")
@@ -365,7 +419,9 @@ def run_multi_pair_oos(split_year=2021, rr=1.5, lookahead=20,
     print(f"\n{'='*70}")
     print(f"  RESUMEN — MULTI-PAIR OOS ({split_year}–2026)")
     print(f"{'='*70}")
-    print(f"  {'Par':<10} {'Trades':>7} {'Win%':>7} {'Expect':>10} {'PF':>8} {'MaxDD':>8} {'B/S':>8}")
+    print(
+        f"  {'Par':<10} {'Trades':>7} {'Win%':>7} {'Expect':>10} {'PF':>8} {'MaxDD':>8} {'B/S':>8}"
+    )
     print(f"  {'-'*60}")
 
     total_trades = 0
@@ -383,7 +439,9 @@ def run_multi_pair_oos(split_year=2021, rr=1.5, lookahead=20,
             sells = m.get("n_sells", 0)
 
             status = "✅" if exp > 0 else "❌"
-            print(f"  {status} {pair:<8} {n:>7} {wr:>6.1f}% {exp:>10.6f} {pf:>8.4f} {dd:>7.1f}% {buys}/{sells}")
+            print(
+                f"  {status} {pair:<8} {n:>7} {wr:>6.1f}% {exp:>10.6f} {pf:>8.4f} {dd:>7.1f}% {buys}/{sells}"
+            )
 
             total_trades += n
             if exp > 0:

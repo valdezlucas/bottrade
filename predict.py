@@ -1,5 +1,6 @@
 import joblib
 import pandas as pd
+
 from data import load_data
 from fractals import detect_fractals
 
@@ -44,12 +45,14 @@ def predict(path, model_path="model.joblib"):
         prob = max_probs[i]
 
         if pred != 0 and prob >= threshold:
-            signals.append({
-                "index": i,
-                "signal": labels_map[pred],
-                "probability": round(prob, 4),
-                "close": df["Close"].iloc[i],
-            })
+            signals.append(
+                {
+                    "index": i,
+                    "signal": labels_map[pred],
+                    "probability": round(prob, 4),
+                    "close": df["Close"].iloc[i],
+                }
+            )
 
     print(f"\n🎯 Señales encontradas (threshold={threshold}):")
     print(f"   Total filas analizadas: {len(df)}")
@@ -59,7 +62,9 @@ def predict(path, model_path="model.joblib"):
         print(f"\n   Últimas señales:")
         for s in signals[-10:]:
             emoji = "🟢" if s["signal"] == "BUY" else "🔴"
-            print(f"   {emoji} [{s['index']}] {s['signal']} @ {s['close']:.5f} "
-                  f"(prob: {s['probability']:.2%})")
+            print(
+                f"   {emoji} [{s['index']}] {s['signal']} @ {s['close']:.5f} "
+                f"(prob: {s['probability']:.2%})"
+            )
 
     return signals, df

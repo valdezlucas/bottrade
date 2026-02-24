@@ -11,21 +11,22 @@ Usage:
 """
 
 import argparse
-import numpy as np
-import pandas as pd
-import joblib
-import yfinance as yf
 from datetime import datetime, timedelta
 
+import joblib
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
+from costs import TradingCosts
 from features import create_features
 from fractals import detect_fractals
-from costs import TradingCosts
 
 # Models per timeframe
 MODELS = {
-    "1H":    {"buy": "model_1h.joblib",    "sell": "model_1h_sell.joblib"},
-    "4H":    {"buy": "model_4h.joblib",     "sell": "model_4h_sell.joblib"},
-    "Daily": {"buy": "model_multi.joblib",  "sell": "model_multi_sell.joblib"},
+    "1H": {"buy": "model_1h.joblib", "sell": "model_1h_sell.joblib"},
+    "4H": {"buy": "model_4h.joblib", "sell": "model_4h_sell.joblib"},
+    "Daily": {"buy": "model_multi.joblib", "sell": "model_multi_sell.joblib"},
 }
 
 
@@ -68,7 +69,7 @@ def download_pair(ticker, pair_name, interval="1d", days=730):
         start=start.strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
         interval=interval,
-        progress=False
+        progress=False,
     )
     if df.empty:
         return None
@@ -105,10 +106,19 @@ def resample_to_4h(df_1h):
 
 
 # ─── Backtest engine ────────────────────────────────────────────────────
-def run_pair_backtest(df, model_path, sell_model_path, tf_name,
-                     pip_value=0.0001, spread_pips=1.5, lot_size=100000,
-                     risk_per_trade=0.005, rr_ratio=1.5, max_dd_pct=25.0,
-                     initial_balance=10000):
+def run_pair_backtest(
+    df,
+    model_path,
+    sell_model_path,
+    tf_name,
+    pip_value=0.0001,
+    spread_pips=1.5,
+    lot_size=100000,
+    risk_per_trade=0.005,
+    rr_ratio=1.5,
+    max_dd_pct=25.0,
+    initial_balance=10000,
+):
     """Run backtest on any pair data with the specified model."""
 
     # Load models
@@ -163,7 +173,7 @@ def run_pair_backtest(df, model_path, sell_model_path, tf_name,
         spread_pips=spread_pips,
         max_slippage_pips=max(1.0, spread_pips * 0.3),
         swap_per_night=0.0,
-        pip_value=pip_value
+        pip_value=pip_value,
     )
 
     # Simulation
@@ -202,8 +212,12 @@ def run_pair_backtest(df, model_path, sell_model_path, tf_name,
 
             if hit_sl:
                 exit_price = current_trade.sl
-                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(current_trade.nights)
-                current_trade.close(i, exit_price, "SL", exit_cost, current_trade.nights)
+                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(
+                    current_trade.nights
+                )
+                current_trade.close(
+                    i, exit_price, "SL", exit_cost, current_trade.nights
+                )
 
                 risk_usd = balance * risk_per_trade
                 usd_pnl = current_trade.pnl * (risk_usd / atr)
@@ -213,8 +227,12 @@ def run_pair_backtest(df, model_path, sell_model_path, tf_name,
 
             elif hit_tp:
                 exit_price = current_trade.tp
-                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(current_trade.nights)
-                current_trade.close(i, exit_price, "TP", exit_cost, current_trade.nights)
+                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(
+                    current_trade.nights
+                )
+                current_trade.close(
+                    i, exit_price, "TP", exit_cost, current_trade.nights
+                )
 
                 risk_usd = balance * risk_per_trade
                 usd_pnl = current_trade.pnl * (risk_usd / atr)
@@ -223,7 +241,9 @@ def run_pair_backtest(df, model_path, sell_model_path, tf_name,
                 current_trade = None
 
         # Drawdown check
-        current_dd = (peak_balance - balance) / peak_balance * 100 if peak_balance > 0 else 0
+        current_dd = (
+            (peak_balance - balance) / peak_balance * 100 if peak_balance > 0 else 0
+        )
         if current_dd >= max_dd_pct and not dd_breaker_triggered:
             dd_breaker_triggered = True
 
@@ -255,7 +275,9 @@ def run_pair_backtest(df, model_path, sell_model_path, tf_name,
                     sl_price = entry_price + sl_distance
                     tp_price = entry_price - tp_distance
 
-                current_trade = Trade(i, signal, entry_price, sl_price, tp_price, entry_cost)
+                current_trade = Trade(
+                    i, signal, entry_price, sl_price, tp_price, entry_cost
+                )
 
         equity_curve.append(balance)
         peak_balance = max(peak_balance, balance)
@@ -263,7 +285,9 @@ def run_pair_backtest(df, model_path, sell_model_path, tf_name,
     # Close open trade at end
     if current_trade is not None and current_trade.is_open():
         exit_cost = costs_sim.exit_cost()
-        current_trade.close(len(df_work)-1, df_work["Close"].iloc[-1], "END", exit_cost)
+        current_trade.close(
+            len(df_work) - 1, df_work["Close"].iloc[-1], "END", exit_cost
+        )
         atr_last = df_work["ATR"].iloc[-1]
         risk_usd = balance * risk_per_trade
         usd_pnl = current_trade.pnl * (risk_usd / atr_last) if atr_last > 0 else 0
@@ -373,28 +397,90 @@ def compute_results(tf_name, trades, equity_curve, initial_balance, final_balanc
 # ─── Main ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-Timeframe Backtest")
-    parser.add_argument("--pair", type=str, default="BTC-USD", help="Pair name (e.g. GBPJPY, EURUSD, BTC-USD)")
-    parser.add_argument("--ticker", type=str, default=None, help="yfinance ticker (e.g. GBPJPY=X, BTC-USD)")
+    parser.add_argument(
+        "--pair",
+        type=str,
+        default="BTC-USD",
+        help="Pair name (e.g. GBPJPY, EURUSD, BTC-USD)",
+    )
+    parser.add_argument(
+        "--ticker",
+        type=str,
+        default=None,
+        help="yfinance ticker (e.g. GBPJPY=X, BTC-USD)",
+    )
     parser.add_argument("--pip", type=float, default=None, help="Pip value")
     parser.add_argument("--spread", type=float, default=None, help="Spread in pips")
     parser.add_argument("--lot-size", type=int, default=None, help="Lot size")
-    parser.add_argument("--risk", type=float, default=0.005, help="Risk per trade (default: 0.5%%)")
+    parser.add_argument(
+        "--risk", type=float, default=0.005, help="Risk per trade (default: 0.5%%)"
+    )
     parser.add_argument("--balance", type=float, default=10000, help="Initial balance")
     args = parser.parse_args()
 
     # Presets
     PRESETS = {
-        "BTC-USD":  {"ticker": "BTC-USD",   "pip": 1.0,    "spread": 30.0, "lot_size": 1},
-        "GBPJPY":   {"ticker": "GBPJPY=X",  "pip": 0.01,   "spread": 2.0,  "lot_size": 100000},
-        "EURJPY":   {"ticker": "EURJPY=X",  "pip": 0.01,   "spread": 1.5,  "lot_size": 100000},
-        "USDJPY":   {"ticker": "USDJPY=X",  "pip": 0.01,   "spread": 1.0,  "lot_size": 100000},
-        "EURUSD":   {"ticker": "EURUSD=X",  "pip": 0.0001, "spread": 1.0,  "lot_size": 100000},
-        "GBPUSD":   {"ticker": "GBPUSD=X",  "pip": 0.0001, "spread": 1.2,  "lot_size": 100000},
-        "AUDUSD":   {"ticker": "AUDUSD=X",  "pip": 0.0001, "spread": 1.2,  "lot_size": 100000},
-        "NZDUSD":   {"ticker": "NZDUSD=X",  "pip": 0.0001, "spread": 1.5,  "lot_size": 100000},
-        "USDCAD":   {"ticker": "USDCAD=X",  "pip": 0.0001, "spread": 1.5,  "lot_size": 100000},
-        "USDCHF":   {"ticker": "USDCHF=X",  "pip": 0.0001, "spread": 1.5,  "lot_size": 100000},
-        "EURGBP":   {"ticker": "EURGBP=X",  "pip": 0.0001, "spread": 1.5,  "lot_size": 100000},
+        "BTC-USD": {"ticker": "BTC-USD", "pip": 1.0, "spread": 30.0, "lot_size": 1},
+        "GBPJPY": {
+            "ticker": "GBPJPY=X",
+            "pip": 0.01,
+            "spread": 2.0,
+            "lot_size": 100000,
+        },
+        "EURJPY": {
+            "ticker": "EURJPY=X",
+            "pip": 0.01,
+            "spread": 1.5,
+            "lot_size": 100000,
+        },
+        "USDJPY": {
+            "ticker": "USDJPY=X",
+            "pip": 0.01,
+            "spread": 1.0,
+            "lot_size": 100000,
+        },
+        "EURUSD": {
+            "ticker": "EURUSD=X",
+            "pip": 0.0001,
+            "spread": 1.0,
+            "lot_size": 100000,
+        },
+        "GBPUSD": {
+            "ticker": "GBPUSD=X",
+            "pip": 0.0001,
+            "spread": 1.2,
+            "lot_size": 100000,
+        },
+        "AUDUSD": {
+            "ticker": "AUDUSD=X",
+            "pip": 0.0001,
+            "spread": 1.2,
+            "lot_size": 100000,
+        },
+        "NZDUSD": {
+            "ticker": "NZDUSD=X",
+            "pip": 0.0001,
+            "spread": 1.5,
+            "lot_size": 100000,
+        },
+        "USDCAD": {
+            "ticker": "USDCAD=X",
+            "pip": 0.0001,
+            "spread": 1.5,
+            "lot_size": 100000,
+        },
+        "USDCHF": {
+            "ticker": "USDCHF=X",
+            "pip": 0.0001,
+            "spread": 1.5,
+            "lot_size": 100000,
+        },
+        "EURGBP": {
+            "ticker": "EURGBP=X",
+            "pip": 0.0001,
+            "spread": 1.5,
+            "lot_size": 100000,
+        },
     }
 
     preset = PRESETS.get(args.pair, {})
@@ -406,8 +492,12 @@ if __name__ == "__main__":
     risk = args.risk
 
     bt_kwargs = dict(
-        pip_value=pip_value, spread_pips=spread, lot_size=lot_size,
-        risk_per_trade=risk, rr_ratio=1.5, max_dd_pct=25.0,
+        pip_value=pip_value,
+        spread_pips=spread,
+        lot_size=lot_size,
+        risk_per_trade=risk,
+        rr_ratio=1.5,
+        max_dd_pct=25.0,
         initial_balance=initial_balance,
     )
 
@@ -426,8 +516,15 @@ if __name__ == "__main__":
     df_daily = download_pair(ticker, args.pair, interval="1d", days=1500)
     if df_daily is not None:
         df_daily_clean = df_daily.drop(columns=["Datetime"], errors="ignore")
-        r = run_pair_backtest(df_daily_clean, MODELS["Daily"]["buy"], MODELS["Daily"]["sell"], "Daily", **bt_kwargs)
-        if r: results.append(r)
+        r = run_pair_backtest(
+            df_daily_clean,
+            MODELS["Daily"]["buy"],
+            MODELS["Daily"]["sell"],
+            "Daily",
+            **bt_kwargs,
+        )
+        if r:
+            results.append(r)
 
     # ─── 4H ─────────────────────────────────────────────────────────
     print(f"\n{'#'*60}")
@@ -438,8 +535,11 @@ if __name__ == "__main__":
     if df_1h_raw is not None:
         df_4h = resample_to_4h(df_1h_raw)
         if df_4h is not None:
-            r = run_pair_backtest(df_4h, MODELS["4H"]["buy"], MODELS["4H"]["sell"], "4H", **bt_kwargs)
-            if r: results.append(r)
+            r = run_pair_backtest(
+                df_4h, MODELS["4H"]["buy"], MODELS["4H"]["sell"], "4H", **bt_kwargs
+            )
+            if r:
+                results.append(r)
 
     # ─── 1H ─────────────────────────────────────────────────────────
     print(f"\n{'#'*60}")
@@ -448,20 +548,26 @@ if __name__ == "__main__":
 
     if df_1h_raw is not None:
         df_1h_clean = df_1h_raw.drop(columns=["Datetime"], errors="ignore")
-        r = run_pair_backtest(df_1h_clean, MODELS["1H"]["buy"], MODELS["1H"]["sell"], "1H", **bt_kwargs)
-        if r: results.append(r)
+        r = run_pair_backtest(
+            df_1h_clean, MODELS["1H"]["buy"], MODELS["1H"]["sell"], "1H", **bt_kwargs
+        )
+        if r:
+            results.append(r)
 
     # ─── Resumen comparativo ────────────────────────────────────────
     if results:
         print(f"\n{'='*60}")
         print(f"  RESUMEN COMPARATIVO -- {args.pair}")
         print(f"{'='*60}")
-        print(f"  {'TF':<8} {'Trades':>7} {'WinRate':>8} {'Return':>9} {'MaxDD':>7} {'PF':>6} {'Final$':>10}")
+        print(
+            f"  {'TF':<8} {'Trades':>7} {'WinRate':>8} {'Return':>9} {'MaxDD':>7} {'PF':>6} {'Final$':>10}"
+        )
         print(f"  {'-'*58}")
         for r in results:
             if r.get("trades", 0) > 0:
-                print(f"  {r['tf']:<8} {r['trades']:>7} {r['win_rate']:>7.1f}% {r['return_pct']:>+8.2f}% {r['max_dd']:>6.2f}% {r['profit_factor']:>5.2f} ${r['final_balance']:>9,.2f}")
+                print(
+                    f"  {r['tf']:<8} {r['trades']:>7} {r['win_rate']:>7.1f}% {r['return_pct']:>+8.2f}% {r['max_dd']:>6.2f}% {r['profit_factor']:>5.2f} ${r['final_balance']:>9,.2f}"
+                )
             else:
                 print(f"  {r['tf']:<8} {'No trades':>50}")
         print(f"{'='*60}")
-

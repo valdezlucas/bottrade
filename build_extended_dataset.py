@@ -1,9 +1,11 @@
 import sys
+
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 import pandas as pd
 import yfinance as yf
+
 from features import create_features
 from fractals import detect_fractals
 from ml_dataset import label_data
@@ -37,7 +39,7 @@ EXTENDED_ASSETS = {
     "PG": "PG",
     "XOM": "XOM",
     "BABA": "BABA",
-    "SAN": "SAN"
+    "SAN": "SAN",
 }
 
 all_data = []
@@ -45,29 +47,29 @@ all_data = []
 for name, ticker in EXTENDED_ASSETS.items():
     print(f"📥 Descargando {name} ({ticker}) (1D, desde 2010)...")
     df = yf.download(ticker, start="2010-01-01", interval="1d", progress=False)
-    
+
     if df.empty:
         print(f"⚠️ {name} sin datos, saltando.")
         continue
-        
+
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    
+
     df = df.reset_index()
     if "Date" in df.columns:
         df = df.rename(columns={"Date": "Datetime"})
-    
+
     df = df.dropna(subset=["Open", "High", "Low", "Close"])
 
     print(f"   ✅ {len(df)} velas descargadas.")
-    
+
     print(f"   ⚙️ Calculando features y labels...")
     try:
         df = create_features(df)
         df = detect_fractals(df)
         df = label_data(df, lookahead=20, rr=1.5)
         # We append a column to identify the asset later if needed
-        df['Asset'] = name
+        df["Asset"] = name
         all_data.append(df)
     except Exception as e:
         print(f"   ❌ Error procesando {name}: {e}")

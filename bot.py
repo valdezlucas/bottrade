@@ -17,11 +17,12 @@ Uso:
   python bot.py                  # Correr el bot (local o cloud)
   python bot.py --scan-now       # Solo hacer un scan y broadcast
 """
-import sys
-import os
+
+import asyncio
 import json
 import logging
-import asyncio
+import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -35,27 +36,37 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from features import create_features
-from fractals import detect_fractals
 from firebase_manager import (
-    db_add_subscriber, db_remove_subscriber, db_get_subscribers,
-    db_save_signal, db_get_active_signals, db_close_signal,
-    db, db_init_user_account, db_get_user_account, db_is_trial_active,
-    db_toggle_alerts, db_deposit, db_can_receive_signal, SIGNAL_COST
+    SIGNAL_COST,
+    db,
+    db_add_subscriber,
+    db_can_receive_signal,
+    db_close_signal,
+    db_deposit,
+    db_get_active_signals,
+    db_get_subscribers,
+    db_get_user_account,
+    db_init_user_account,
+    db_is_trial_active,
+    db_remove_subscriber,
+    db_save_signal,
+    db_toggle_alerts,
 )
+from fractals import detect_fractals
 
 # ─── CONFIG ────────────────────────────────────────────────────────────
 BOT_TOKEN = "5967657374:AAHX9XuJBmRxIYWn9AgcsCBtTK5mr3O2yTY"
 # Modelos por timeframe
 MODELS = {
-    "4H":        "model_4h.joblib",
-    "Daily":     "model_multi.joblib",
+    "4H": "model_4h.joblib",
+    "Daily": "model_multi.joblib",
     "BTC_Daily": "model_btc_daily.joblib",
 }
 TF_EMOJIS = {"4H": "⏳", "Daily": "📅", "BTC_Daily": "₿"}
 MODEL_PATH = "model_multi.joblib"  # legacy fallback
 SUBSCRIBERS_FILE = "subscribers.json"
-SCAN_HOUR = 22        # Hora en que escanea (22:00 UTC-3 = cierre vela diaria NY)
-RISK_PCT = 0.005      # 0.5% riesgo por trade (para calcular lotes)
+SCAN_HOUR = 22  # Hora en que escanea (22:00 UTC-3 = cierre vela diaria NY)
+RISK_PCT = 0.005  # 0.5% riesgo por trade (para calcular lotes)
 DEFAULT_BALANCE = 10000  # Balance de referencia para calcular lotes
 # ──────────────────────────────────────────────────────────────────────
 
@@ -67,15 +78,14 @@ PAIRS = {
     "AUDUSD": {"ticker": "AUDUSD=X", "spread": 1.2, "pip": 0.0001, "decimals": 5},
     "USDCAD": {"ticker": "USDCAD=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
     "USDCHF": {"ticker": "USDCHF=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "USDJPY": {"ticker": "USDJPY=X", "spread": 1.2, "pip": 0.01,   "decimals": 3},
-    "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01,   "decimals": 3},
-    "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01,   "decimals": 3},
-    
+    "USDJPY": {"ticker": "USDJPY=X", "spread": 1.2, "pip": 0.01, "decimals": 3},
+    "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01, "decimals": 3},
+    "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01, "decimals": 3},
     # Acciones Robustas (PF > 1.3)
-    "MSFT":   {"ticker": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
-    "TSLA":   {"ticker": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
-    "PG":     {"ticker": "PG",   "spread": 5.0, "pip": 0.01, "decimals": 2},
-    "XOM":    {"ticker": "XOM",  "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "MSFT": {"ticker": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "TSLA": {"ticker": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "PG": {"ticker": "PG", "spread": 5.0, "pip": 0.01, "decimals": 2},
+    "XOM": {"ticker": "XOM", "spread": 5.0, "pip": 0.01, "decimals": 2},
 }
 
 # Bitcoin — par separado con modelo propio
@@ -84,10 +94,19 @@ BTC_PAIRS = {
 }
 
 PAIR_FLAGS = {
-    "GBPUSD": "🇬🇧🇺🇸", "AUDUSD": "🇦🇺🇺🇸", "NZDUSD": "🇳🇿🇺🇸", 
-    "USDCAD": "🇺🇸🇨🇦", "USDCHF": "🇺🇸🇨🇭", "USDJPY": "🇺🇸🇯🇵", 
-    "EURJPY": "🇪🇺🇯🇵", "GBPJPY": "🇬🇧🇯🇵", "BTCUSD": "₿",
-    "MSFT": "💻", "TSLA": "🚗", "PG": "🧴", "XOM": "🛢️"
+    "GBPUSD": "🇬🇧🇺🇸",
+    "AUDUSD": "🇦🇺🇺🇸",
+    "NZDUSD": "🇳🇿🇺🇸",
+    "USDCAD": "🇺🇸🇨🇦",
+    "USDCHF": "🇺🇸🇨🇭",
+    "USDJPY": "🇺🇸🇯🇵",
+    "EURJPY": "🇪🇺🇯🇵",
+    "GBPJPY": "🇬🇧🇯🇵",
+    "BTCUSD": "₿",
+    "MSFT": "💻",
+    "TSLA": "🚗",
+    "PG": "🧴",
+    "XOM": "🛢️",
 }
 
 logging.basicConfig(
@@ -112,7 +131,6 @@ bot_state = {
 # ─── Suscriptores ──────────────────────────────────────────────────────
 # Eliminamos funciones locales de JSON y usamos las de Firebase
 # ──────────────────────────────────────────────────────────────────────
-
 
 
 # ─── Telegram API ──────────────────────────────────────────────────────
@@ -207,18 +225,20 @@ def tg_broadcast_with_billing(text, parse_mode="MarkdownV2"):
 
     for chat_id in subs:
         reason, can_receive = db_can_receive_signal(int(chat_id))
-        
+
         if can_receive:
             if tg_send(int(chat_id), text, parse_mode):
                 ok_count += 1
         else:
             blocked_count += 1
             if reason == "no_balance":
-                tg_send_keyboard(int(chat_id),
+                tg_send_keyboard(
+                    int(chat_id),
                     "⚠️ *Señal detectada pero no enviada*\n\n"
                     "Tu prueba gratuita finalizó y no tenés saldo suficiente\\.\n"
                     f"Cada señal cuesta *$0\\.50 USD*\\.\n\n"
-                    "_Depositá saldo para seguir recibiendo señales usando el botón 💰 Depositar\\._")
+                    "_Depositá saldo para seguir recibiendo señales usando el botón 💰 Depositar\\._",
+                )
             # Si es "no_alerts" no enviamos nada (el usuario las desactivó)
         time.sleep(0.05)
 
@@ -246,12 +266,19 @@ def tg_get_updates(offset=None):
 # ─── ML Scanner ────────────────────────────────────────────────────────
 def download_data(ticker, days=120, interval="1d"):
     """Descarga datos de Yahoo Finance para cualquier timeframe."""
-    import yfinance as yf
     from datetime import timedelta
+
+    import yfinance as yf
+
     end = datetime.now()
     start = end - timedelta(days=days)
-    df = yf.download(ticker, start=start.strftime("%Y-%m-%d"),
-                     end=end.strftime("%Y-%m-%d"), interval=interval, progress=False)
+    df = yf.download(
+        ticker,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        interval=interval,
+        progress=False,
+    )
     if df.empty:
         return None
     if isinstance(df.columns, pd.MultiIndex):
@@ -261,7 +288,9 @@ def download_data(ticker, days=120, interval="1d"):
         df = df.rename(columns={"Date": "Datetime"})
     elif "index" in df.columns:
         df = df.rename(columns={"index": "Datetime"})
-    return df if all(c in df.columns for c in ["Open", "High", "Low", "Close"]) else None
+    return (
+        df if all(c in df.columns for c in ["Open", "High", "Low", "Close"]) else None
+    )
 
 
 def resample_to_4h(df_1h):
@@ -353,7 +382,7 @@ def run_scan(timeframe="Daily"):
         if len(probas) >= 3:
             prob_buy = probas[1]
             prob_sell = probas[2]
-            
+
             if prob_buy >= threshold and prob_buy > prob_sell:
                 signal = "BUY"
                 confidence = prob_buy
@@ -376,29 +405,43 @@ def run_scan(timeframe="Daily"):
 
         base_curr = pair[:3]
         quote_curr = pair[3:]
-        
+
         # 1. Check Pair Count Constraints (Max 2 per currency)
-        if cluster_counts.get(base_curr, 0) >= MAX_PER_CLUSTER or cluster_counts.get(quote_curr, 0) >= MAX_PER_CLUSTER:
-            log.info(f"  {pair}: {signal} rechazada por límite de clúster (Máx {MAX_PER_CLUSTER} pares para {base_curr}/{quote_curr})")
+        if (
+            cluster_counts.get(base_curr, 0) >= MAX_PER_CLUSTER
+            or cluster_counts.get(quote_curr, 0) >= MAX_PER_CLUSTER
+        ):
+            log.info(
+                f"  {pair}: {signal} rechazada por límite de clúster (Máx {MAX_PER_CLUSTER} pares para {base_curr}/{quote_curr})"
+            )
             continue
-            
+
         # Sizing dinámico conservador basado en probabilidad calibrada
-        base_risk_pct = RISK_PCT # 0.5%
-        max_risk_pct = 0.01      # 1.0% cap para canary por trade
+        base_risk_pct = RISK_PCT  # 0.5%
+        max_risk_pct = 0.01  # 1.0% cap para canary por trade
         alpha = 0.5
-        
+
         # Risk = BaseRisk * ( (Prob - Threshold) / (1 - Threshold) ) * alpha + BaseRisk
         if confidence > threshold:
-            scaled_risk = base_risk_pct * ((confidence - threshold) / (1.0 - threshold)) * alpha + base_risk_pct
+            scaled_risk = (
+                base_risk_pct * ((confidence - threshold) / (1.0 - threshold)) * alpha
+                + base_risk_pct
+            )
         else:
             scaled_risk = base_risk_pct
-            
+
         adjusted_risk_pct = min(scaled_risk, max_risk_pct)
-        
+
         # 2. Check Currency Risk Constraints (Max 1.5% exposure per currency)
-        if cluster_risk.get(base_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT or cluster_risk.get(quote_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT:
-             log.info(f"  {pair}: {signal} rechazada por límite de riesgo correlacionado (Expondría {base_curr}/{quote_curr} a > 1.5%)")
-             continue
+        if (
+            cluster_risk.get(base_curr, 0) + adjusted_risk_pct > MAX_CLUSTER_RISK_PCT
+            or cluster_risk.get(quote_curr, 0) + adjusted_risk_pct
+            > MAX_CLUSTER_RISK_PCT
+        ):
+            log.info(
+                f"  {pair}: {signal} rechazada por límite de riesgo correlacionado (Expondría {base_curr}/{quote_curr} a > 1.5%)"
+            )
+            continue
 
         # Validated. Update cluster tracking.
         cluster_counts[base_curr] = cluster_counts.get(base_curr, 0) + 1
@@ -424,30 +467,34 @@ def run_scan(timeframe="Daily"):
 
         sl_pips = sl_dist / pip
         tp_pips = tp_dist / pip
-        
+
         risk_usd = DEFAULT_BALANCE * adjusted_risk_pct
         volume = round(risk_usd / (sl_pips * 10), 2)
 
-        signals.append({
-            "pair": pair,
-            "signal": signal,
-            "confidence": confidence,
-            "entry": round(entry, config["decimals"]),
-            "sl": round(sl, config["decimals"]),
-            "tp": round(tp, config["decimals"]),
-            "sl_pips": sl_pips,
-            "tp_pips": tp_pips,
-            "atr_pips": atr / pip,
-            "risk_usd": risk_usd,
-            "volume": volume,
-            "timeframe": timeframe,
-        })
+        signals.append(
+            {
+                "pair": pair,
+                "signal": signal,
+                "confidence": confidence,
+                "entry": round(entry, config["decimals"]),
+                "sl": round(sl, config["decimals"]),
+                "tp": round(tp, config["decimals"]),
+                "sl_pips": sl_pips,
+                "tp_pips": tp_pips,
+                "atr_pips": atr / pip,
+                "risk_usd": risk_usd,
+                "volume": volume,
+                "timeframe": timeframe,
+            }
+        )
         log.info(f"  {pair}: {signal} ({confidence:.1%})")
 
     bot_state["last_scan"] = datetime.now().isoformat()
     bot_state["last_signals"] = signals
     bot_state["total_scans"] += 1
-    log.info(f"Scan completo: {len(signals)} señal(es). Riesgo USD total: {cluster_risk.get('USD', 0):.2%}")
+    log.info(
+        f"Scan completo: {len(signals)} señal(es). Riesgo USD total: {cluster_risk.get('USD', 0):.2%}"
+    )
     return signals
 
 
@@ -562,8 +609,10 @@ def handle_command(chat_id, text, first_name, username):
 
     elif cmd in ["/stop", "stop"]:
         db_remove_subscriber(chat_id)
-        tg_send(chat_id,
-                "👋 *Desuscripto\\.*\n\nYa no recibirás más señales\\.\nUsá /start para volver\\.")
+        tg_send(
+            chat_id,
+            "👋 *Desuscripto\\.*\n\nYa no recibirás más señales\\.\nUsá /start para volver\\.",
+        )
 
     elif cmd in ["/signal", "signal"]:
         tg_send(chat_id, "🔍 *Escaneando mercados\\.\\.\\.*")
@@ -572,10 +621,15 @@ def handle_command(chat_id, text, first_name, username):
             for s in signals:
                 tg_send(chat_id, build_signal_message(s))
         else:
-            tg_send(chat_id, "⏸ *Sin señales ahora*\\.\n\nEl modelo está en HOLD para todos los pares\\.")
+            tg_send(
+                chat_id,
+                "⏸ *Sin señales ahora*\\.\n\nEl modelo está en HOLD para todos los pares\\.",
+            )
 
     elif cmd in ["/menu", "menu"]:
-        tg_send_keyboard(chat_id, "🤖 *Menú Principal*\n\n_Usá los botones de abajo ⬇️_")
+        tg_send_keyboard(
+            chat_id, "🤖 *Menú Principal*\n\n_Usá los botones de abajo ⬇️_"
+        )
 
     else:
         tg_send_keyboard(chat_id, "❓ *Usá los botones del teclado o /start*")
@@ -589,14 +643,14 @@ def handle_action(chat_id, action):
         if not user:
             tg_send(chat_id, "⚠️ Usá /start primero para crear tu cuenta\\.")
             return
-        
+
         joined = user.get("joined", "Desconocido")
         balance = user.get("balance", 0.0)
         alerts = user.get("alerts_enabled", True)
         is_trial = db_is_trial_active(chat_id)
         total_signals = user.get("total_signals_received", 0)
         total_spent = user.get("total_spent", 0.0)
-        
+
         if is_trial:
             trial_end = user.get("trial_end", "")[:10]
             status = f"🆓 Prueba Gratuita \\(hasta {trial_end}\\)"
@@ -604,10 +658,10 @@ def handle_action(chat_id, action):
             status = "💳 Usuario Pago"
         else:
             status = "⚠️ Sin saldo"
-        
+
         alerts_emoji = "🟢 Activadas" if alerts else "🔴 Desactivadas"
         toggle_text = "🔴 Desactivar Alertas" if alerts else "🟢 Activar Alertas"
-        
+
         msg = (
             f"💼 *Tu Cuenta*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -631,48 +685,61 @@ def handle_action(chat_id, action):
             tg_send(chat_id, "⚠️ Error\\. Usá /start primero\\.")
             return
         if new_state:
-            tg_send_keyboard(chat_id, "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.")
+            tg_send_keyboard(
+                chat_id,
+                "🟢 *Alertas ACTIVADAS*\n\nVolverás a recibir señales de trading\\.",
+            )
         else:
-            tg_send_keyboard(chat_id, "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.")
+            tg_send_keyboard(
+                chat_id,
+                "🔴 *Alertas DESACTIVADAS*\n\nNo recibirás señales hasta que las reactives\\.",
+            )
 
     elif action == "cmd_depositar":
-        tg_send_keyboard(chat_id,
+        tg_send_keyboard(
+            chat_id,
             "💰 *Depositar Saldo*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Elegí tu método de pago y avisa al @admin:\n\n"
             "🟡 *PayPal* \u2014 Instantáneo (pagos@tradingbot.com)\n"
             "🟢 *Cripto USDT \\(TRC20\\)* \u2014 TXyz1234567890abcdef\n"
             "🔵 *Transferencia Bancaria* \u2014 CBU: 0000003100012345678901\n\n"
-            "_Cada señal cuesta $0\\.50 USD_")
+            "_Cada señal cuesta $0\\.50 USD_",
+        )
 
     elif action == "dep_paypal":
         awaiting_deposit[chat_id] = "paypal"
         awaiting_deposit[chat_id] = "paypal"
-        tg_send_keyboard(chat_id,
+        tg_send_keyboard(
+            chat_id,
             "🟡 *Depósito vía PayPal*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enviá tu pago a:\n"
             "📧 `pagos@tradingbot\\.com`\n\n"
             "Luego envía un mensaje con el *monto* enviado\n"
             "Ejemplo: `10`\n\n"
-            "_Tu saldo se actualiza al instante\\._")
+            "_Tu saldo se actualiza al instante\\._",
+        )
 
     elif action == "dep_crypto":
         awaiting_deposit[chat_id] = "crypto"
         awaiting_deposit[chat_id] = "crypto"
-        tg_send_keyboard(chat_id,
+        tg_send_keyboard(
+            chat_id,
             "🟢 *Depósito vía Cripto*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Enviá USDT \\(Red TRC20\\) a:\n"
             "📎 `TXyz1234567890abcdef`\n\n"
             "Luego envía un mensaje con el *monto* enviado\n"
             "Ejemplo: `25`\n\n"
-            "_Sin comisión \\| Confirmación en 2 min\\._")
+            "_Sin comisión \\| Confirmación en 2 min\\._",
+        )
 
     elif action == "dep_bank":
         awaiting_deposit[chat_id] = "bank"
         awaiting_deposit[chat_id] = "bank"
-        tg_send_keyboard(chat_id,
+        tg_send_keyboard(
+            chat_id,
             "🔵 *Depósito vía Transferencia*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "🏦 *Banco:* Ejemplo Bank\n"
@@ -680,7 +747,8 @@ def handle_action(chat_id, action):
             "👤 *Titular:* Trading Bot SRL\n\n"
             "Luego envía un mensaje con el *monto* transferido\n"
             "Ejemplo: `50`\n\n"
-            "_Acreditación en 1\\-2 días hábiles\\._")
+            "_Acreditación en 1\\-2 días hábiles\\._",
+        )
 
     elif action == "cmd_cancel_deposit":
         awaiting_deposit.pop(chat_id, None)
@@ -712,12 +780,14 @@ def handle_action(chat_id, action):
             doc = db.collection("reports").document("blind_test_v8").get()
             if doc.exists:
                 report = doc.to_dict()
-        
+
         if not report:
-            tg_send_keyboard(chat_id,
-                "📊 *Rendimiento Out-of-Sample*\n━━━━━━━━━━━━━━━━━━━━\n\n_Reporte no generado aún\\._\n\nEjecutá `blind_backtest.py` para generar métricas de ingeniería\\.")
+            tg_send_keyboard(
+                chat_id,
+                "📊 *Rendimiento Out-of-Sample*\n━━━━━━━━━━━━━━━━━━━━\n\n_Reporte no generado aún\\._\n\nEjecutá `blind_backtest.py` para generar métricas de ingeniería\\.",
+            )
             return
-        
+
         msg = (
             f"📊 *Reporte de Ingeniería (OOS)*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -737,21 +807,25 @@ def handle_action(chat_id, action):
     elif action == "cmd_history":
         trades = []
         if db:
-            docs = db.collection("backtest_history").order_by("order").limit(10).stream()
+            docs = (
+                db.collection("backtest_history").order_by("order").limit(10).stream()
+            )
             trades = [doc.to_dict() for doc in docs]
-        
+
         if not trades:
-            tg_send_keyboard(chat_id,
-                "📜 *Historial de Operaciones*\n━━━━━━━━━━━━━━━━━━━━\n\n_No hay operaciones registradas aún\\._\n\n_El historial se actualiza con cada backtest\\._")
+            tg_send_keyboard(
+                chat_id,
+                "📜 *Historial de Operaciones*\n━━━━━━━━━━━━━━━━━━━━\n\n_No hay operaciones registradas aún\\._\n\n_El historial se actualiza con cada backtest\\._",
+            )
             return
-        
+
         wins = sum(1 for t in trades if t.get("result") == "TP")
         losses = sum(1 for t in trades if t.get("result") == "SL")
         total = wins + losses
         wr = wins / max(1, total) * 100
-        
+
         msg = f"📜 *Últimas Operaciones \\(Backtest\\)*\n━━━━━━━━━━━━━━━━━━━━\n"
-        
+
         for t in trades[:10]:
             result = t.get("result", "?")
             if result == "TP":
@@ -760,20 +834,20 @@ def handle_action(chat_id, action):
                 emoji = "❌"
             else:
                 emoji = "⏳"
-            
+
             sig = "🟢" if t.get("signal") == "BUY" else "🔴"
             pair = t.get("pair", "???")
             entry = str(t.get("entry", "?"))[:8]
             conf = t.get("confidence", 0)
-            
+
             msg += f"{emoji} {sig} *{pair}* → `{entry}` \\({conf*100:.0f}%\\)\n"
-        
+
         msg += (
             f"\n━━━━━━━━━━━━━━━━━━━━\n"
             f"📊 *Win Rate:* {wr:.0f}% \\({wins}W / {losses}L\\)\n"
             f"_Basado en backtest de últimos 6 meses_"
         )
-        
+
         tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_vip":
@@ -805,11 +879,15 @@ def handle_action(chat_id, action):
         for pair, config in PAIRS.items():
             try:
                 import yfinance as yf
+
                 # Bajar datos de 1 minuto del día actual para precio en vivo
-                df = yf.download(config["ticker"], period="1d", interval="1m", progress=False)
+                df = yf.download(
+                    config["ticker"], period="1d", interval="1m", progress=False
+                )
                 if df is not None and not df.empty:
                     last_price = df["Close"].iloc[-1]
                     import pandas as pd
+
                     if isinstance(last_price, pd.Series):
                         last_price = last_price.iloc[0]
                     flag = PAIR_FLAGS.get(pair, "💱")
@@ -822,7 +900,9 @@ def handle_action(chat_id, action):
     elif action == "cmd_active":
         active = db_get_active_signals()
         if not active:
-            tg_send_keyboard(chat_id, "📭 *No hay operaciones abiertas en este momento\\.*")
+            tg_send_keyboard(
+                chat_id, "📭 *No hay operaciones abiertas en este momento\\.*"
+            )
             return
         msg = "📈 *Operaciones en Seguimiento*\n━━━━━━━━━━━━━━━━━━━━\n"
         for pair, s in active.items():
@@ -837,21 +917,37 @@ def handle_action(chat_id, action):
         if signals:
             for s in signals:
                 tg_send(chat_id, build_signal_message(s))
-            tg_send_keyboard(chat_id, f"✅ *Escaneo finalizado\\.* {len(signals)} señales encontradas\\.")
+            tg_send_keyboard(
+                chat_id,
+                f"✅ *Escaneo finalizado\\.* {len(signals)} señales encontradas\\.",
+            )
         else:
-            tg_send_keyboard(chat_id, "⏸ *Sin señales en este momento*\\.\n\nEl modelo está en HOLD para todos los pares\\.")
+            tg_send_keyboard(
+                chat_id,
+                "⏸ *Sin señales en este momento*\\.\n\nEl modelo está en HOLD para todos los pares\\.",
+            )
 
     elif action == "cmd_scan_crypto":
-        tg_send_keyboard(chat_id, "🔍 *Escaneando mercado Cripto \\(Pump & Dump\\) con IA\\.\\.\\.*")
+        tg_send_keyboard(
+            chat_id, "🔍 *Escaneando mercado Cripto \\(Pump & Dump\\) con IA\\.\\.\\.*"
+        )
         try:
             import bot_shitcoins
+
             bot_shitcoins.run_scan_job()
-            tg_send_keyboard(chat_id, "✅ *Escaneo Cripto finalizado\\.* Si hubo señales, fueron enviadas\\.")
+            tg_send_keyboard(
+                chat_id,
+                "✅ *Escaneo Cripto finalizado\\.* Si hubo señales, fueron enviadas\\.",
+            )
         except Exception as e:
-            tg_send_keyboard(chat_id, f"❌ *Error en scanner:* `{str(e)}`".replace(".", "\\."))
+            tg_send_keyboard(
+                chat_id, f"❌ *Error en scanner:* `{str(e)}`".replace(".", "\\.")
+            )
 
     elif action == "cmd_menu":
-        tg_send_keyboard(chat_id, "🤖 *Menú Principal*\\n\\n_Usá los botones de abajo ⬇️_")
+        tg_send_keyboard(
+            chat_id, "🤖 *Menú Principal*\\n\\n_Usá los botones de abajo ⬇️_"
+        )
 
 
 # ─── Main loop (long polling) ──────────────────────────────────────────
@@ -868,32 +964,38 @@ def run_monitor_loop():
             if not active:
                 time.sleep(300)
                 continue
-                
+
             for pair, s in active.items():
                 config = PAIRS.get(pair)
-                if not config: continue
-                
+                if not config:
+                    continue
+
                 df = download_data(config["ticker"], days=3)
-                if df is None or df.empty: continue
-                
+                if df is None or df.empty:
+                    continue
+
                 curr = df.iloc[-1]["Close"]
                 high = df.iloc[-1]["High"]
                 low = df.iloc[-1]["Low"]
-                
+
                 hit = None
                 if s["signal"] == "BUY":
-                    if high >= s["tp"]: hit = "TP"
-                    elif low <= s["sl"]: hit = "SL"
-                else: # SELL
-                    if low <= s["tp"]: hit = "TP"
-                    elif high >= s["sl"]: hit = "SL"
-                
+                    if high >= s["tp"]:
+                        hit = "TP"
+                    elif low <= s["sl"]:
+                        hit = "SL"
+                else:  # SELL
+                    if low <= s["tp"]:
+                        hit = "TP"
+                    elif high >= s["sl"]:
+                        hit = "SL"
+
                 if hit:
                     # Notificar cierre
                     emoji = "🎯 TP" if hit == "TP" else "🛑 SL"
                     flag = PAIR_FLAGS.get(pair, "💱")
-                    entry_str = str(s['entry']).replace('.', '\\.')
-                    curr_str = str(curr).replace('.', '\\.')
+                    entry_str = str(s["entry"]).replace(".", "\\.")
+                    curr_str = str(curr).replace(".", "\\.")
                     msg = (
                         f"🏁 *OPERACIÓN CERRADA* — {pair}\n"
                         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -903,13 +1005,14 @@ def run_monitor_loop():
                         f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"{'✅ PROFIT' if hit == 'TP' else '❌ LOSS'}\n"
                     )
-                    tg_broadcast(msg)
+                    tg_broadcast_with_billing(msg)
                     db_close_signal(pair, hit, curr)
-            
-            time.sleep(300) # Revisa cada 5 min
+
+            time.sleep(300)  # Revisa cada 5 min
         except Exception as e:
             log.error(f"Error en monitor loop: {e}")
             time.sleep(60)
+
 
 def run_polling():
     """Loop principal: escucha mensajes de Telegram con long polling."""
@@ -921,7 +1024,7 @@ def run_polling():
             updates = tg_get_updates(offset)
             for update in updates:
                 offset = update["update_id"] + 1
-                
+
                 # Manejar callback queries (botones inline)
                 cb = update.get("callback_query")
                 if cb:
@@ -930,7 +1033,7 @@ def run_polling():
                     tg_answer_callback(cb["id"])
                     handle_action(cb_chat_id, cb_data)
                     continue
-                
+
                 msg = update.get("message")
                 if not msg:
                     continue
@@ -938,7 +1041,7 @@ def run_polling():
                 text = msg.get("text", "").strip()
                 first_name = msg["chat"].get("first_name", "")
                 username = msg["chat"].get("username", "")
-                
+
                 # Manejar depósitos pendientes
                 if chat_id in awaiting_deposit and text:
                     try:
@@ -946,13 +1049,20 @@ def run_polling():
                         if amount > 0:
                             new_balance = db_deposit(chat_id, amount)
                             if new_balance is not None:
-                                tg_send_keyboard(chat_id,
+                                tg_send_keyboard(
+                                    chat_id,
                                     f"✅ *Depósito exitoso*\n\n"
                                     f"💵 Monto: *${amount:.2f} USD*\n"
                                     f"💰 Nuevo saldo: *${new_balance:.2f} USD*\n\n"
-                                    f"_Tenés para {int(new_balance / SIGNAL_COST)} señales\\._".replace(".", "\\."))
+                                    f"_Tenés para {int(new_balance / SIGNAL_COST)} señales\\._".replace(
+                                        ".", "\\."
+                                    ),
+                                )
                             else:
-                                tg_send(chat_id, "❌ Error al depositar\\. Intentá de nuevo\\.")
+                                tg_send(
+                                    chat_id,
+                                    "❌ Error al depositar\\. Intentá de nuevo\\.",
+                                )
                             awaiting_deposit.pop(chat_id, None)
                             continue
                         else:
@@ -961,7 +1071,7 @@ def run_polling():
                     except ValueError:
                         # No es un número, procesar como comando normal
                         awaiting_deposit.pop(chat_id, None)
-                
+
                 handle_command(chat_id, text, first_name, username)
         except KeyboardInterrupt:
             log.info("Bot detenido.")
@@ -984,10 +1094,11 @@ def run_scheduler():
         schedule.every(4).hours.do(scan_and_broadcast, "4H")
         log.info("⏳ 4H scan programado cada 4 horas")
 
-    # 1H (Crypto / Shitcoins Parabolic Reversal) 
+    # 1H (Crypto / Shitcoins Parabolic Reversal)
     # Analiza futuros de Binance cada hora en el minuto :01
     try:
         from bot_shitcoins import run_scan_job as run_shitcoin_scan
+
         schedule.every().hour.at(":01").do(run_shitcoin_scan)
         log.info("🚀 Shitcoins 1H scan programado cada hora en el minuto :01")
     except Exception as e:
@@ -1005,8 +1116,11 @@ def run_scheduler():
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--scan-now", action="store_true", help="Hacer scan y broadcast ahora")
+    parser.add_argument(
+        "--scan-now", action="store_true", help="Hacer scan y broadcast ahora"
+    )
     args = parser.parse_args()
 
     if args.scan_now:

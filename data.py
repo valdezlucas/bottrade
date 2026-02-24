@@ -1,5 +1,7 @@
 import pandas as pd
+
 from features import create_features
+
 
 def load_data(path):
     df = pd.read_csv(path)

@@ -1,9 +1,12 @@
 """Quick test of BTC-specific daily model vs forex-trained daily model."""
+
+from datetime import datetime, timedelta
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 import yfinance as yf
-from datetime import datetime, timedelta
+
 from features import create_features
 from fractals import detect_fractals
 
@@ -12,8 +15,13 @@ def quick_backtest(model_path, sell_model_path, label):
     # Download BTC daily
     end = datetime.now()
     start = end - timedelta(days=1500)
-    df = yf.download("BTC-USD", start=start.strftime("%Y-%m-%d"),
-                     end=end.strftime("%Y-%m-%d"), interval="1d", progress=False)
+    df = yf.download(
+        "BTC-USD",
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        interval="1d",
+        progress=False,
+    )
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df = df.reset_index(drop=True)
@@ -101,7 +109,12 @@ def quick_backtest(model_path, sell_model_path, label):
                 if sig == "BUY":
                     current = {"dir": "BUY", "entry": c, "sl": c - sl_d, "tp": c + tp_d}
                 else:
-                    current = {"dir": "SELL", "entry": c, "sl": c + sl_d, "tp": c - tp_d}
+                    current = {
+                        "dir": "SELL",
+                        "entry": c,
+                        "sl": c + sl_d,
+                        "tp": c - tp_d,
+                    }
 
     total = wins + losses
     wr = wins / total * 100 if total > 0 else 0
@@ -121,9 +134,15 @@ if __name__ == "__main__":
     print("=== BTC-USD Daily: Modelo Forex vs Modelo BTC-Especifico ===\n")
 
     # Test 1: Forex-trained model on BTC
-    quick_backtest("model_multi.joblib", "model_multi_sell.joblib",
-                   "BTC Daily — FOREX-TRAINED MODEL")
+    quick_backtest(
+        "model_multi.joblib",
+        "model_multi_sell.joblib",
+        "BTC Daily — FOREX-TRAINED MODEL",
+    )
 
     # Test 2: BTC-specific model
-    quick_backtest("model_btc_daily.joblib", "model_btc_daily_sell.joblib",
-                   "BTC Daily — BTC-SPECIFIC MODEL")
+    quick_backtest(
+        "model_btc_daily.joblib",
+        "model_btc_daily_sell.joblib",
+        "BTC Daily — BTC-SPECIFIC MODEL",
+    )

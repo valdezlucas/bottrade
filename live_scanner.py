@@ -16,16 +16,17 @@ El scanner muestra:
   - Tamaño de posición en lotes
   - Risk/reward y riesgo en USD
 """
+
 import argparse
-import sys
-import os
 import csv
 import json
+import os
+import sys
 from datetime import datetime, timedelta
 
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 import yfinance as yf
 
 if sys.platform == "win32":
@@ -36,7 +37,8 @@ from fractals import detect_fractals
 from train import get_feature_columns
 
 try:
-    from telegram_alerts import send_signal_alert, send_no_signals_alert
+    from telegram_alerts import send_no_signals_alert, send_signal_alert
+
     TELEGRAM_ENABLED = True
 except Exception:
     TELEGRAM_ENABLED = False
@@ -55,10 +57,25 @@ SCAN_PAIRS = {
 
 JOURNAL_FILE = "trade_journal.csv"
 JOURNAL_HEADERS = [
-    "datetime", "pair", "signal", "confidence", "close", "atr",
-    "entry", "sl", "tp", "sl_pips", "tp_pips",
-    "risk_usd", "position_lots", "rr_ratio", "status", "exit_price",
-    "exit_datetime", "pnl_usd", "notes"
+    "datetime",
+    "pair",
+    "signal",
+    "confidence",
+    "close",
+    "atr",
+    "entry",
+    "sl",
+    "tp",
+    "sl_pips",
+    "tp_pips",
+    "risk_usd",
+    "position_lots",
+    "rr_ratio",
+    "status",
+    "exit_price",
+    "exit_datetime",
+    "pnl_usd",
+    "notes",
 ]
 
 
@@ -183,13 +200,15 @@ def generate_signal(df, model_artifact, sell_artifact, pair_config):
             sl = entry + sl_distance
             tp = entry - tp_distance
 
-        result.update({
-            "entry": round(entry, pair_config["decimals"]),
-            "sl": round(sl, pair_config["decimals"]),
-            "tp": round(tp, pair_config["decimals"]),
-            "sl_pips": round(sl_distance / pip, 1),
-            "tp_pips": round(tp_distance / pip, 1),
-        })
+        result.update(
+            {
+                "entry": round(entry, pair_config["decimals"]),
+                "sl": round(sl, pair_config["decimals"]),
+                "tp": round(tp, pair_config["decimals"]),
+                "sl_pips": round(sl_distance / pip, 1),
+                "tp_pips": round(tp_distance / pip, 1),
+            }
+        )
 
     return result, None
 
@@ -251,14 +270,20 @@ def log_to_journal(pair, signal_result, position):
         writer.writerow(row)
 
 
-def scan_all_pairs(model_path="model_multi.joblib",
-                   sell_model_path="model_multi_sell.joblib",
-                   balance=10000, risk_pct=0.005, only_pair=None):
+def scan_all_pairs(
+    model_path="model_multi.joblib",
+    sell_model_path="model_multi_sell.joblib",
+    balance=10000,
+    risk_pct=0.005,
+    only_pair=None,
+):
     """Escanea todos los pares y muestra señales."""
 
     print("═" * 70)
     print(f"  🔍  LIVE SIGNAL SCANNER — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"  Capital: ${balance:,.2f} | Riesgo: {risk_pct*100:.1f}% (${balance*risk_pct:.2f}/trade)")
+    print(
+        f"  Capital: ${balance:,.2f} | Riesgo: {risk_pct*100:.1f}% (${balance*risk_pct:.2f}/trade)"
+    )
     print("═" * 70)
 
     # Cargar modelos
@@ -304,11 +329,17 @@ def scan_all_pairs(model_path="model_multi.joblib",
         print(f"  ├──────────────────────────────────────────────────┤")
         print(f"  │  Precio actual:  {result['close']:.{config['decimals']}f}")
         print(f"  │  Entry:          {result['entry']:.{config['decimals']}f}")
-        print(f"  │  Stop Loss:      {result['sl']:.{config['decimals']}f}  ({result['sl_pips']:.0f} pips)")
-        print(f"  │  Take Profit:    {result['tp']:.{config['decimals']}f}  ({result['tp_pips']:.0f} pips)")
+        print(
+            f"  │  Stop Loss:      {result['sl']:.{config['decimals']}f}  ({result['sl_pips']:.0f} pips)"
+        )
+        print(
+            f"  │  Take Profit:    {result['tp']:.{config['decimals']}f}  ({result['tp_pips']:.0f} pips)"
+        )
         print(f"  │  ATR:            {result['atr_pips']:.0f} pips")
         print(f"  ├──────────────────────────────────────────────────┤")
-        print(f"  │  Posición:       {position['position_lots']:.2f} lotes ({position['position_units']:,} uds)")
+        print(
+            f"  │  Posición:       {position['position_lots']:.2f} lotes ({position['position_units']:,} uds)"
+        )
         print(f"  │  Riesgo:         ${position['risk_usd']:.2f}")
         print(f"  │  Si TP:          +${position['potential_win']:.2f}")
         print(f"  │  Si SL:          -${position['potential_loss']:.2f}")
@@ -341,7 +372,9 @@ def scan_all_pairs(model_path="model_multi.joblib",
         print(f"  📊  {len(signals_found)} SEÑAL(ES) ENCONTRADA(S)")
         for s in signals_found:
             emoji = "🟢" if s["signal"] == "BUY" else "🔴"
-            print(f"      {emoji} {s['pair']} {s['signal']} @ {s['entry']} → SL:{s['sl']} TP:{s['tp']}")
+            print(
+                f"      {emoji} {s['pair']} {s['signal']} @ {s['entry']} → SL:{s['sl']} TP:{s['tp']}"
+            )
         print(f"\n  📁 Registrado en: {JOURNAL_FILE}")
     else:
         print(f"  ⏸️  Sin señales hoy — modelo en HOLD para todos los pares")
@@ -355,11 +388,19 @@ def scan_all_pairs(model_path="model_multi.joblib",
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Live Signal Scanner")
-    parser.add_argument("--model", default="model_multi.joblib", help="Modelo principal")
-    parser.add_argument("--sell-model", default="model_multi_sell.joblib", help="Modelo SELL")
+    parser.add_argument(
+        "--model", default="model_multi.joblib", help="Modelo principal"
+    )
+    parser.add_argument(
+        "--sell-model", default="model_multi_sell.joblib", help="Modelo SELL"
+    )
     parser.add_argument("--balance", type=float, default=10000, help="Capital")
-    parser.add_argument("--risk", type=float, default=0.005, help="Riesgo por trade (0.005 = 0.5%%)")
-    parser.add_argument("--pair", type=str, default=None, help="Solo escanear un par (ej: EURUSD)")
+    parser.add_argument(
+        "--risk", type=float, default=0.005, help="Riesgo por trade (0.005 = 0.5%%)"
+    )
+    parser.add_argument(
+        "--pair", type=str, default=None, help="Solo escanear un par (ej: EURUSD)"
+    )
 
     args = parser.parse_args()
 

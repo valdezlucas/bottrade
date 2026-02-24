@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+
 from costs import TradingCosts
 
 
@@ -129,7 +130,10 @@ def optimize_threshold(df_test, predictions_proba, model, thresholds=None, costs
         all_results.append(result)
 
         if metrics is not None:
-            if best_metrics is None or metrics["expectancy"] > best_metrics["expectancy"]:
+            if (
+                best_metrics is None
+                or metrics["expectancy"] > best_metrics["expectancy"]
+            ):
                 best_metrics = metrics
                 best_threshold = th
 
@@ -146,7 +150,9 @@ def print_fold_report(fold_num, metrics, threshold):
         print("  ⚠️  INVÁLIDO — Menos de 30 trades")
         return
 
-    print(f"  Trades:         {metrics['n_trades']} ({metrics['wins']}W / {metrics['losses']}L)")
+    print(
+        f"  Trades:         {metrics['n_trades']} ({metrics['wins']}W / {metrics['losses']}L)"
+    )
     print(f"  Win Rate:       {metrics['win_rate']*100:.1f}%")
     print(f"  Avg Win:        {metrics['avg_win']:.6f}")
     print(f"  Avg Loss:       {metrics['avg_loss']:.6f}")

@@ -10,25 +10,25 @@ Usage:
     python train_multi_tf.py --tf 4h       # Train only 4H
 """
 
+import argparse
 import os
 import sys
-import argparse
+
 import numpy as np
 import pandas as pd
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
-import joblib
-import yfinance as yf
 from datetime import datetime, timedelta
 
-from sklearn.ensemble import GradientBoostingClassifier
+import joblib
+import yfinance as yf
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import GradientBoostingClassifier
 
 from features import create_features
 from fractals import detect_fractals
 from ml_dataset import label_data
-
 
 # ─── Pares a entrenar (Activos Robustos OOS 2022-2026) ───────────────────
 PAIRS = {
@@ -42,17 +42,24 @@ PAIRS = {
     "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01},
     "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01},
     # Acciones Robustas
-    "MSFT":   {"ticker": "MSFT", "spread": 5.0, "pip": 0.01},
-    "TSLA":   {"ticker": "TSLA", "spread": 5.0, "pip": 0.01},
-    "PG":     {"ticker": "PG",   "spread": 5.0, "pip": 0.01},
-    "XOM":    {"ticker": "XOM",  "spread": 5.0, "pip": 0.01},
+    "MSFT": {"ticker": "MSFT", "spread": 5.0, "pip": 0.01},
+    "TSLA": {"ticker": "TSLA", "spread": 5.0, "pip": 0.01},
+    "PG": {"ticker": "PG", "spread": 5.0, "pip": 0.01},
+    "XOM": {"ticker": "XOM", "spread": 5.0, "pip": 0.01},
 }
 
 # Features que NO son input del modelo
 EXCLUDE_COLS = [
-    "Open", "High", "Low", "Close", "Volume",
-    "target", "potential_win", "potential_loss",
-    "fractal_high", "fractal_low",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "target",
+    "potential_win",
+    "potential_loss",
+    "fractal_high",
+    "fractal_low",
     "Datetime",
 ]
 
@@ -203,7 +210,9 @@ def train_timeframe(tf_name, lookahead, rr):
         df_prepared = prepare_data(df, lookahead=lookahead, rr=rr)
 
         if df_prepared is None or len(df_prepared) < 100:
-            print(f"  ⚠️  {pair}: datos insuficientes ({len(df_prepared) if df_prepared is not None else 0} filas)")
+            print(
+                f"  ⚠️  {pair}: datos insuficientes ({len(df_prepared) if df_prepared is not None else 0} filas)"
+            )
             continue
 
         if feature_cols is None:
@@ -251,8 +260,9 @@ def train_timeframe(tf_name, lookahead, rr):
 
         # Arquitectura Campeona LightGBM Multiclase + GPU
         import lightgbm as lgb
+
         base_model = lgb.LGBMClassifier(
-            device="gpu",           
+            device="gpu",
             gpu_platform_id=0,
             gpu_device_id=0,
             learning_rate=0.061024,
@@ -265,9 +275,9 @@ def train_timeframe(tf_name, lookahead, rr):
             lambda_l2=9.3739e-07,
             class_weight="balanced",
             random_state=42,
-            verbose=-1
+            verbose=-1,
         )
-        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
+        model = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
         model.fit(X_tr, y_tr)
 
         y_pred = model.predict(X_te)
@@ -306,7 +316,9 @@ def train_timeframe(tf_name, lookahead, rr):
                 best_exp = exp
                 best_th = th
 
-        print(f"  Fold {fold+1}: Train {train_end} | Test {test_end-train_end} → Exp: {best_exp:.6f}")
+        print(
+            f"  Fold {fold+1}: Train {train_end} | Test {test_end-train_end} → Exp: {best_exp:.6f}"
+        )
 
     print(f"\n🎯 Threshold óptimo: {best_th}")
 
@@ -315,8 +327,9 @@ def train_timeframe(tf_name, lookahead, rr):
 
     # Modelo principal unificado (multiclass: HOLD=0, BUY=1, SELL=2)
     import lightgbm as lgb
+
     main_base = lgb.LGBMClassifier(
-        device="gpu",           
+        device="gpu",
         gpu_platform_id=0,
         gpu_device_id=0,
         learning_rate=0.061024,
@@ -329,21 +342,30 @@ def train_timeframe(tf_name, lookahead, rr):
         lambda_l2=9.3739e-07,
         class_weight="balanced",
         random_state=42,
-        verbose=-1
+        verbose=-1,
     )
-    main_model = CalibratedClassifierCV(main_base, method='isotonic', cv=3)
+    main_model = CalibratedClassifierCV(main_base, method="isotonic", cv=3)
     main_model.fit(X_all, y_all)
 
     main_path = f"model_{tf_name}.joblib"
-    joblib.dump({
-        "model": main_model,
-        "feature_columns": feature_cols,
-        "threshold": best_th,
-    }, main_path)
+    joblib.dump(
+        {
+            "model": main_model,
+            "feature_columns": feature_cols,
+            "threshold": best_th,
+        },
+        main_path,
+    )
     print(f"  💾 Modelo MULTICLASE guardado: {main_path}")
 
     # Feature importance a partir del ensemble calibrado
-    importances_array = np.mean([clf.estimator.feature_importances_ for clf in main_model.calibrated_classifiers_], axis=0)
+    importances_array = np.mean(
+        [
+            clf.estimator.feature_importances_
+            for clf in main_model.calibrated_classifiers_
+        ],
+        axis=0,
+    )
     importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\n📊 Top 10 features ({tf_name.upper()}):")
@@ -356,23 +378,34 @@ def train_timeframe(tf_name, lookahead, rr):
 
 # ─── Main ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Multi-Timeframe Model Trainer (GPU LightGBM)")
-    parser.add_argument("--tf", type=str, default="ALL",
-                        choices=["4h", "1h", "ALL"],
-                        help="Timeframe a entrenar (1h, 4h o ALL)")
-    parser.add_argument("--lookahead-4h", type=int, default=10,
-                        help="Lookahead para 4H (default: 10 barras = 40h)")
-    parser.add_argument("--rr", type=float, default=1.5,
-                        help="Ratio Reward/Risk (default: 1.5)")
+    parser = argparse.ArgumentParser(
+        description="Multi-Timeframe Model Trainer (GPU LightGBM)"
+    )
+    parser.add_argument(
+        "--tf",
+        type=str,
+        default="ALL",
+        choices=["4h", "1h", "ALL"],
+        help="Timeframe a entrenar (1h, 4h o ALL)",
+    )
+    parser.add_argument(
+        "--lookahead-4h",
+        type=int,
+        default=10,
+        help="Lookahead para 4H (default: 10 barras = 40h)",
+    )
+    parser.add_argument(
+        "--rr", type=float, default=1.5, help="Ratio Reward/Risk (default: 1.5)"
+    )
     args = parser.parse_args()
 
     # Lookahead ajustado por timeframe:
     # 4H: 10 barras = mira 40 horas adelante
     # 1H: 20 barras = mira 20 horas adelante
-    
+
     if args.tf in ["4h", "ALL"]:
         train_timeframe("4h", lookahead=args.lookahead_4h, rr=args.rr)
-    
+
     if args.tf in ["1h", "ALL"]:
         train_timeframe("1h", lookahead=20, rr=args.rr)
 

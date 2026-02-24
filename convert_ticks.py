@@ -6,8 +6,10 @@ Formato de entrada (tab-separated):
 
 Genera un CSV con: Open, High, Low, Close, Volume
 """
-import pandas as pd
+
 import sys
+
+import pandas as pd
 
 
 def ticks_to_ohlcv(input_path, output_path, timeframe="1h"):
@@ -47,11 +49,15 @@ def ticks_to_ohlcv(input_path, output_path, timeframe="1h"):
     print(f"Ticks con precio valido: {len(df):,}")
 
     # Resamplear a velas OHLCV
-    ohlcv = df["price"].resample(timeframe).agg(
-        Open="first",
-        High="max",
-        Low="min",
-        Close="last",
+    ohlcv = (
+        df["price"]
+        .resample(timeframe)
+        .agg(
+            Open="first",
+            High="max",
+            Low="min",
+            Close="last",
+        )
     )
 
     # Volumen: contar ticks por vela (proxy de volumen en Forex)

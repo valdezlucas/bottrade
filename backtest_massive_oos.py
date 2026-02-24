@@ -15,22 +15,22 @@ Realistic costs include:
 """
 
 import sys
-import numpy as np
-import pandas as pd
-import joblib
-import yfinance as yf
 from datetime import datetime, timedelta
 
+import joblib
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
+from costs import TradingCosts
 from features import create_features
 from fractals import detect_fractals
-from costs import TradingCosts
-
 
 # ─── Model paths ────────────────────────────────────────────────────────
 MODELS = {
-    "Daily": {"buy": "model_multi.joblib",      "sell": "model_multi_sell.joblib"},
-    "4H":    {"buy": "model_4h.joblib",          "sell": "model_4h_sell.joblib"},
-    "1H":    {"buy": "model_1h.joblib",          "sell": "model_1h_sell.joblib"},
+    "Daily": {"buy": "model_multi.joblib", "sell": "model_multi_sell.joblib"},
+    "4H": {"buy": "model_4h.joblib", "sell": "model_4h_sell.joblib"},
+    "1H": {"buy": "model_1h.joblib", "sell": "model_1h_sell.joblib"},
 }
 
 # ─── UNSEEN FOREX PAIRS ────────────────────────────────────────────────
@@ -40,16 +40,86 @@ MODELS = {
 # commission: round-turn commission in USD per standard lot (100K)
 # swap_per_night: average daily swap cost in pips (averaged long/short)
 FOREX_PAIRS = {
-    "CADJPY":  {"ticker": "CADJPY=X",  "pip": 0.01,   "spread": 2.0,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.3},
-    "CADCHF":  {"ticker": "CADCHF=X",  "pip": 0.0001, "spread": 2.5,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.4},
-    "NZDCAD":  {"ticker": "NZDCAD=X",  "pip": 0.0001, "spread": 2.5,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.3},
-    "EURNZD":  {"ticker": "EURNZD=X",  "pip": 0.0001, "spread": 3.5,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.5},
-    "GBPNZD":  {"ticker": "GBPNZD=X",  "pip": 0.0001, "spread": 4.0,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.5},
-    "GBPCAD":  {"ticker": "GBPCAD=X",  "pip": 0.0001, "spread": 3.0,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.4},
-    "AUDCAD":  {"ticker": "AUDCAD=X",  "pip": 0.0001, "spread": 2.0,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.3},
-    "AUDNZD":  {"ticker": "AUDNZD=X",  "pip": 0.0001, "spread": 2.5,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.3},
-    "NZDCHF":  {"ticker": "NZDCHF=X",  "pip": 0.0001, "spread": 3.0,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.4},
-    "CHFJPY":  {"ticker": "CHFJPY=X",  "pip": 0.01,   "spread": 2.5,  "lot": 100000, "commission_usd": 7.0, "swap_pips": 0.3},
+    "CADJPY": {
+        "ticker": "CADJPY=X",
+        "pip": 0.01,
+        "spread": 2.0,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
+    "CADCHF": {
+        "ticker": "CADCHF=X",
+        "pip": 0.0001,
+        "spread": 2.5,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.4,
+    },
+    "NZDCAD": {
+        "ticker": "NZDCAD=X",
+        "pip": 0.0001,
+        "spread": 2.5,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
+    "EURNZD": {
+        "ticker": "EURNZD=X",
+        "pip": 0.0001,
+        "spread": 3.5,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.5,
+    },
+    "GBPNZD": {
+        "ticker": "GBPNZD=X",
+        "pip": 0.0001,
+        "spread": 4.0,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.5,
+    },
+    "GBPCAD": {
+        "ticker": "GBPCAD=X",
+        "pip": 0.0001,
+        "spread": 3.0,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.4,
+    },
+    "AUDCAD": {
+        "ticker": "AUDCAD=X",
+        "pip": 0.0001,
+        "spread": 2.0,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
+    "AUDNZD": {
+        "ticker": "AUDNZD=X",
+        "pip": 0.0001,
+        "spread": 2.5,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
+    "NZDCHF": {
+        "ticker": "NZDCHF=X",
+        "pip": 0.0001,
+        "spread": 3.0,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.4,
+    },
+    "CHFJPY": {
+        "ticker": "CHFJPY=X",
+        "pip": 0.01,
+        "spread": 2.5,
+        "lot": 100000,
+        "commission_usd": 7.0,
+        "swap_pips": 0.3,
+    },
 }
 
 # ─── CRYPTO PAIRS ───────────────────────────────────────────────────────
@@ -58,14 +128,70 @@ FOREX_PAIRS = {
 # commission: taker fee (0.1% each way for spot, ~0.06% for futures)
 # No swap, but funding rate simulated via swap_pips
 CRYPTO_PAIRS = {
-    "ETH":    {"ticker": "ETH-USD",   "pip": 0.01,  "spread": 0.50,    "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "SOL":    {"ticker": "SOL-USD",   "pip": 0.001, "spread": 0.03,    "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "XRP":    {"ticker": "XRP-USD",   "pip": 0.0001,"spread": 0.001,   "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "BNB":    {"ticker": "BNB-USD",   "pip": 0.01,  "spread": 0.15,    "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "ADA":    {"ticker": "ADA-USD",   "pip": 0.0001,"spread": 0.0005,  "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "DOGE":   {"ticker": "DOGE-USD",  "pip": 0.0001,"spread": 0.0003,  "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "AVAX":   {"ticker": "AVAX-USD",  "pip": 0.001, "spread": 0.05,    "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
-    "LINK":   {"ticker": "LINK-USD",  "pip": 0.001, "spread": 0.02,    "lot": 1, "commission_pct": 0.001, "swap_pips": 0.0},
+    "ETH": {
+        "ticker": "ETH-USD",
+        "pip": 0.01,
+        "spread": 0.50,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "SOL": {
+        "ticker": "SOL-USD",
+        "pip": 0.001,
+        "spread": 0.03,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "XRP": {
+        "ticker": "XRP-USD",
+        "pip": 0.0001,
+        "spread": 0.001,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "BNB": {
+        "ticker": "BNB-USD",
+        "pip": 0.01,
+        "spread": 0.15,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "ADA": {
+        "ticker": "ADA-USD",
+        "pip": 0.0001,
+        "spread": 0.0005,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "DOGE": {
+        "ticker": "DOGE-USD",
+        "pip": 0.0001,
+        "spread": 0.0003,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "AVAX": {
+        "ticker": "AVAX-USD",
+        "pip": 0.001,
+        "spread": 0.05,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
+    "LINK": {
+        "ticker": "LINK-USD",
+        "pip": 0.001,
+        "spread": 0.02,
+        "lot": 1,
+        "commission_pct": 0.001,
+        "swap_pips": 0.0,
+    },
 }
 
 
@@ -78,7 +204,7 @@ def download_data(ticker, pair_name, interval="1d", days=730):
         start=start.strftime("%Y-%m-%d"),
         end=end.strftime("%Y-%m-%d"),
         interval=interval,
-        progress=False
+        progress=False,
     )
     if df.empty:
         print(f"  [!] Sin datos para {pair_name}")
@@ -136,10 +262,20 @@ class Trade:
             self.pnl = (self.entry_price - exit_price) - self.costs_entry - costs_exit
 
 
-def run_backtest(df, model_path, sell_model_path, tf_name,
-                 pip_value=0.0001, spread_pips=1.5, swap_per_night=0.0,
-                 commission_per_trade_usd=0.0, risk_per_trade=0.005,
-                 rr_ratio=1.5, max_dd_pct=25.0, initial_balance=10000):
+def run_backtest(
+    df,
+    model_path,
+    sell_model_path,
+    tf_name,
+    pip_value=0.0001,
+    spread_pips=1.5,
+    swap_per_night=0.0,
+    commission_per_trade_usd=0.0,
+    risk_per_trade=0.005,
+    rr_ratio=1.5,
+    max_dd_pct=25.0,
+    initial_balance=10000,
+):
     """
     Run backtest with REALISTIC costs:
       - Spread (entry + exit)
@@ -193,7 +329,7 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
 
     # Trading costs
     spread_cost = spread_pips * pip_value  # in price units
-    slippage_cost = spread_cost * 0.3      # 30% of spread as slippage
+    slippage_cost = spread_cost * 0.3  # 30% of spread as slippage
 
     # Simulation
     balance = initial_balance
@@ -232,8 +368,14 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
             if hit_sl:
                 exit_price = current_trade.sl
                 # Exit costs: half spread + slippage + swap for nights held
-                exit_cost = (spread_cost / 2) + slippage_cost + (swap_per_night * pip_value * current_trade.nights)
-                current_trade.close(i, exit_price, "SL", exit_cost, current_trade.nights)
+                exit_cost = (
+                    (spread_cost / 2)
+                    + slippage_cost
+                    + (swap_per_night * pip_value * current_trade.nights)
+                )
+                current_trade.close(
+                    i, exit_price, "SL", exit_cost, current_trade.nights
+                )
 
                 risk_usd = balance * risk_per_trade
                 usd_pnl = current_trade.pnl * (risk_usd / atr)
@@ -245,8 +387,14 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
 
             elif hit_tp:
                 exit_price = current_trade.tp
-                exit_cost = (spread_cost / 2) + slippage_cost + (swap_per_night * pip_value * current_trade.nights)
-                current_trade.close(i, exit_price, "TP", exit_cost, current_trade.nights)
+                exit_cost = (
+                    (spread_cost / 2)
+                    + slippage_cost
+                    + (swap_per_night * pip_value * current_trade.nights)
+                )
+                current_trade.close(
+                    i, exit_price, "TP", exit_cost, current_trade.nights
+                )
 
                 risk_usd = balance * risk_per_trade
                 usd_pnl = current_trade.pnl * (risk_usd / atr)
@@ -256,7 +404,9 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
                 current_trade = None
 
         # Drawdown check
-        current_dd = (peak_balance - balance) / peak_balance * 100 if peak_balance > 0 else 0
+        current_dd = (
+            (peak_balance - balance) / peak_balance * 100 if peak_balance > 0 else 0
+        )
         if current_dd >= max_dd_pct and not dd_breaker_triggered:
             dd_breaker_triggered = True
 
@@ -289,7 +439,9 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
                     sl_price = entry_price + sl_distance
                     tp_price = entry_price - tp_distance
 
-                current_trade = Trade(i, signal, entry_price, sl_price, tp_price, entry_cost)
+                current_trade = Trade(
+                    i, signal, entry_price, sl_price, tp_price, entry_cost
+                )
 
         equity_curve.append(balance)
         peak_balance = max(peak_balance, balance)
@@ -297,7 +449,9 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
     # Close open trade at end
     if current_trade is not None and current_trade.is_open():
         exit_cost = (spread_cost / 2) + slippage_cost
-        current_trade.close(len(df_work)-1, df_work["Close"].iloc[-1], "END", exit_cost)
+        current_trade.close(
+            len(df_work) - 1, df_work["Close"].iloc[-1], "END", exit_cost
+        )
         atr_last = df_work["ATR"].iloc[-1]
         risk_usd = balance * risk_per_trade
         usd_pnl = current_trade.pnl * (risk_usd / atr_last) if atr_last > 0 else 0
@@ -307,8 +461,16 @@ def run_backtest(df, model_path, sell_model_path, tf_name,
 
     # Compute results
     if not trades:
-        return {"pair": "", "tf": tf_name, "trades": 0, "win_rate": 0, "return_pct": 0,
-                "max_dd": 0, "profit_factor": 0, "final_balance": initial_balance}
+        return {
+            "pair": "",
+            "tf": tf_name,
+            "trades": 0,
+            "win_rate": 0,
+            "return_pct": 0,
+            "max_dd": 0,
+            "profit_factor": 0,
+            "final_balance": initial_balance,
+        }
 
     wins = [t for t in trades if t.pnl and t.pnl > 0]
     losses = [t for t in trades if t.pnl and t.pnl <= 0]
@@ -376,7 +538,13 @@ def test_pair(pair_name, config, is_crypto=False):
     df_daily = download_data(ticker, pair_name, interval="1d", days=1500)
     if df_daily is not None:
         df_clean = df_daily.drop(columns=["Datetime"], errors="ignore")
-        r = run_backtest(df_clean, MODELS["Daily"]["buy"], MODELS["Daily"]["sell"], "Daily", **bt_kwargs)
+        r = run_backtest(
+            df_clean,
+            MODELS["Daily"]["buy"],
+            MODELS["Daily"]["sell"],
+            "Daily",
+            **bt_kwargs,
+        )
         if r:
             r["pair"] = pair_name
             results.append(r)
@@ -386,7 +554,9 @@ def test_pair(pair_name, config, is_crypto=False):
     if df_1h is not None:
         df_4h = resample_to_4h(df_1h)
         if df_4h is not None and len(df_4h) >= 60:
-            r = run_backtest(df_4h, MODELS["4H"]["buy"], MODELS["4H"]["sell"], "4H", **bt_kwargs)
+            r = run_backtest(
+                df_4h, MODELS["4H"]["buy"], MODELS["4H"]["sell"], "4H", **bt_kwargs
+            )
             if r:
                 r["pair"] = pair_name
                 results.append(r)
@@ -395,7 +565,13 @@ def test_pair(pair_name, config, is_crypto=False):
     if df_1h is not None:
         df_1h_clean = df_1h.drop(columns=["Datetime"], errors="ignore")
         if len(df_1h_clean) >= 60:
-            r = run_backtest(df_1h_clean, MODELS["1H"]["buy"], MODELS["1H"]["sell"], "1H", **bt_kwargs)
+            r = run_backtest(
+                df_1h_clean,
+                MODELS["1H"]["buy"],
+                MODELS["1H"]["sell"],
+                "1H",
+                **bt_kwargs,
+            )
             if r:
                 r["pair"] = pair_name
                 results.append(r)
@@ -419,12 +595,16 @@ if __name__ == "__main__":
 
     for i, (pair, config) in enumerate(FOREX_PAIRS.items(), 1):
         print(f"\n--- [{i}/{len(FOREX_PAIRS)}] {pair} ---")
-        print(f"    Spread: {config['spread']} pips | Commission: ${config['commission_usd']}/lot | Swap: {config['swap_pips']} pips/night")
+        print(
+            f"    Spread: {config['spread']} pips | Commission: ${config['commission_usd']}/lot | Swap: {config['swap_pips']} pips/night"
+        )
         results = test_pair(pair, config, is_crypto=False)
         all_results.extend(results)
         for r in results:
             status = "+" if r["return_pct"] > 0 else "-"
-            print(f"    {r['tf']:>6}: {r['trades']:>4} trades | {r['win_rate']:5.1f}% WR | {r['return_pct']:+7.2f}% | PF {r['profit_factor']:5.2f} | DD {r['max_dd']:5.2f}%")
+            print(
+                f"    {r['tf']:>6}: {r['trades']:>4} trades | {r['win_rate']:5.1f}% WR | {r['return_pct']:+7.2f}% | PF {r['profit_factor']:5.2f} | DD {r['max_dd']:5.2f}%"
+            )
 
     # ─── CRYPTO ─────────────────────────────────────────────────────
     print(f"\n{'#' * 70}")
@@ -439,13 +619,17 @@ if __name__ == "__main__":
         results = test_pair(pair, config, is_crypto=True)
         all_results.extend(results)
         for r in results:
-            print(f"    {r['tf']:>6}: {r['trades']:>4} trades | {r['win_rate']:5.1f}% WR | {r['return_pct']:+7.2f}% | PF {r['profit_factor']:5.2f} | DD {r['max_dd']:5.2f}%")
+            print(
+                f"    {r['tf']:>6}: {r['trades']:>4} trades | {r['win_rate']:5.1f}% WR | {r['return_pct']:+7.2f}% | PF {r['profit_factor']:5.2f} | DD {r['max_dd']:5.2f}%"
+            )
 
     # ─── SUMMARY ────────────────────────────────────────────────────
     print(f"\n\n{'=' * 90}")
     print(f"  RESUMEN COMPLETO — {len(all_results)} tests")
     print(f"{'=' * 90}")
-    print(f"  {'Pair':<10} {'TF':<6} {'Trades':>6} {'WR':>6} {'Return':>9} {'MaxDD':>7} {'PF':>6} {'Final':>10} {'Status':>7}")
+    print(
+        f"  {'Pair':<10} {'TF':<6} {'Trades':>6} {'WR':>6} {'Return':>9} {'MaxDD':>7} {'PF':>6} {'Final':>10} {'Status':>7}"
+    )
     print(f"  {'-' * 85}")
 
     profitable = 0
@@ -459,31 +643,45 @@ if __name__ == "__main__":
             profitable += 1
         else:
             losing += 1
-        print(f"  {r['pair']:<10} {r['tf']:<6} {r['trades']:>6} {r['win_rate']:>5.1f}% {r['return_pct']:>+8.2f}% {r['max_dd']:>6.2f}% {r['profit_factor']:>5.2f} ${r['final_balance']:>9,.2f} {status}")
+        print(
+            f"  {r['pair']:<10} {r['tf']:<6} {r['trades']:>6} {r['win_rate']:>5.1f}% {r['return_pct']:>+8.2f}% {r['max_dd']:>6.2f}% {r['profit_factor']:>5.2f} ${r['final_balance']:>9,.2f} {status}"
+        )
 
     total_tests = profitable + losing
     print(f"\n  {'=' * 85}")
-    print(f"  RESULTADO: {profitable}/{total_tests} tests RENTABLES ({profitable/total_tests*100:.0f}%)" if total_tests > 0 else "  Sin resultados")
+    print(
+        f"  RESULTADO: {profitable}/{total_tests} tests RENTABLES ({profitable/total_tests*100:.0f}%)"
+        if total_tests > 0
+        else "  Sin resultados"
+    )
     print(f"  {losing}/{total_tests} tests en PERDIDA" if total_tests > 0 else "")
     print(f"  {'=' * 85}")
 
     # Aggregate by category
-    forex_results = [r for r in all_results if r["pair"] in FOREX_PAIRS and r["trades"] > 0]
-    crypto_results = [r for r in all_results if r["pair"] in CRYPTO_PAIRS and r["trades"] > 0]
+    forex_results = [
+        r for r in all_results if r["pair"] in FOREX_PAIRS and r["trades"] > 0
+    ]
+    crypto_results = [
+        r for r in all_results if r["pair"] in CRYPTO_PAIRS and r["trades"] > 0
+    ]
 
     if forex_results:
         avg_ret = np.mean([r["return_pct"] for r in forex_results])
         avg_wr = np.mean([r["win_rate"] for r in forex_results])
         avg_pf = np.mean([r["profit_factor"] for r in forex_results])
         pos = sum(1 for r in forex_results if r["return_pct"] > 0)
-        print(f"\n  FOREX ({len(forex_results)} tests): avg return {avg_ret:+.2f}% | avg WR {avg_wr:.1f}% | avg PF {avg_pf:.2f} | {pos}/{len(forex_results)} profitable")
+        print(
+            f"\n  FOREX ({len(forex_results)} tests): avg return {avg_ret:+.2f}% | avg WR {avg_wr:.1f}% | avg PF {avg_pf:.2f} | {pos}/{len(forex_results)} profitable"
+        )
 
     if crypto_results:
         avg_ret = np.mean([r["return_pct"] for r in crypto_results])
         avg_wr = np.mean([r["win_rate"] for r in crypto_results])
         avg_pf = np.mean([r["profit_factor"] for r in crypto_results])
         pos = sum(1 for r in crypto_results if r["return_pct"] > 0)
-        print(f"  CRYPTO ({len(crypto_results)} tests): avg return {avg_ret:+.2f}% | avg WR {avg_wr:.1f}% | avg PF {avg_pf:.2f} | {pos}/{len(crypto_results)} profitable")
+        print(
+            f"  CRYPTO ({len(crypto_results)} tests): avg return {avg_ret:+.2f}% | avg WR {avg_wr:.1f}% | avg PF {avg_pf:.2f} | {pos}/{len(crypto_results)} profitable"
+        )
 
     # By timeframe
     for tf in ["Daily", "4H", "1H"]:
@@ -492,4 +690,6 @@ if __name__ == "__main__":
             avg_ret = np.mean([r["return_pct"] for r in tf_results])
             avg_wr = np.mean([r["win_rate"] for r in tf_results])
             pos = sum(1 for r in tf_results if r["return_pct"] > 0)
-            print(f"  {tf:>6} ({len(tf_results)} tests): avg return {avg_ret:+.2f}% | avg WR {avg_wr:.1f}% | {pos}/{len(tf_results)} profitable")
+            print(
+                f"  {tf:>6} ({len(tf_results)} tests): avg return {avg_ret:+.2f}% | avg WR {avg_wr:.1f}% | {pos}/{len(tf_results)} profitable"
+            )

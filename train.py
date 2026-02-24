@@ -1,23 +1,30 @@
-import numpy as np
-import pandas as pd
 import joblib
 import lightgbm as lgb
-from sklearn.metrics import classification_report
+import numpy as np
+import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.metrics import classification_report
 
+from costs import TradingCosts
 from data import load_data
+from evaluation import evaluate_signals, optimize_threshold, print_fold_report
 from fractals import detect_fractals
 from ml_dataset import label_data
-from costs import TradingCosts
-from evaluation import evaluate_signals, optimize_threshold, print_fold_report
-
 
 # Features que usa el modelo (excluye target, potential_win/loss, y columnas OHLCV)
 EXCLUDE_COLS = [
-    "Open", "High", "Low", "Close", "Volume",
-    "target", "potential_win", "potential_loss",
-    "fractal_high", "fractal_low",
-    "Datetime", "Date",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "target",
+    "potential_win",
+    "potential_loss",
+    "fractal_high",
+    "fractal_low",
+    "Datetime",
+    "Date",
 ]
 
 
@@ -87,7 +94,9 @@ def walk_forward_train(df, n_folds=4, costs=None, thresholds=None):
         df_train = df.iloc[:train_end]
         df_test = df.iloc[train_end:test_end]
 
-        print(f"\n--- Fold {fold+1}: Train [0:{train_end}] → Test [{train_end}:{test_end}] ---")
+        print(
+            f"\n--- Fold {fold+1}: Train [0:{train_end}] → Test [{train_end}:{test_end}] ---"
+        )
         print(f"    Train: {len(df_train)} filas | Test: {len(df_test)} filas")
 
         X_train = df_train[feature_cols].values
@@ -109,10 +118,10 @@ def walk_forward_train(df, n_folds=4, costs=None, thresholds=None):
             lambda_l2=9.3739e-07,
             class_weight="balanced",
             random_state=42,
-            n_jobs=2, # Deja nucleos libres para Windows
-            verbose=-1
+            n_jobs=2,  # Deja nucleos libres para Windows
+            verbose=-1,
         )
-        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
+        model = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
         model.fit(X_train, y_train)
 
         # Predicciones y probabilidades
@@ -124,12 +133,15 @@ def walk_forward_train(df, n_folds=4, costs=None, thresholds=None):
         target_names = ["HOLD", "BUY", "SELL"]
         present_classes = sorted(set(y_train) | set(y_pred))
         names = [target_names[i] for i in present_classes if i < len(target_names)]
-        print(classification_report(
-            df_test["target"].values, y_pred,
-            labels=present_classes,
-            target_names=names,
-            zero_division=0,
-        ))
+        print(
+            classification_report(
+                df_test["target"].values,
+                y_pred,
+                labels=present_classes,
+                target_names=names,
+                zero_division=0,
+            )
+        )
 
         # Optimizar threshold
         best_th, best_metrics, th_results = optimize_threshold(
@@ -144,19 +156,23 @@ def walk_forward_train(df, n_folds=4, costs=None, thresholds=None):
             if m is None:
                 print(f"      th={th:.2f} → < 30 trades (inválido)")
             else:
-                print(f"      th={th:.2f} → {m['n_trades']} trades | "
-                      f"Exp: {m['expectancy']:.6f} | PF: {m['profit_factor']:.4f}")
+                print(
+                    f"      th={th:.2f} → {m['n_trades']} trades | "
+                    f"Exp: {m['expectancy']:.6f} | PF: {m['profit_factor']:.4f}"
+                )
 
         # Reporte del mejor threshold
         print_fold_report(fold + 1, best_metrics, best_th)
 
-        all_fold_results.append({
-            "fold": fold + 1,
-            "train_size": len(df_train),
-            "test_size": len(df_test),
-            "best_threshold": best_th,
-            "best_metrics": best_metrics,
-        })
+        all_fold_results.append(
+            {
+                "fold": fold + 1,
+                "train_size": len(df_train),
+                "test_size": len(df_test),
+                "best_threshold": best_th,
+                "best_metrics": best_metrics,
+            }
+        )
 
     return all_fold_results
 
@@ -187,9 +203,9 @@ def train_final_model(df, model_path="model.joblib", threshold=0.6):
         class_weight="balanced",
         random_state=42,
         n_jobs=2,
-        verbose=-1
+        verbose=-1,
     )
-    model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
+    model = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
     model.fit(X, y)
 
     # Guardar modelo + metadata
@@ -206,7 +222,10 @@ def train_final_model(df, model_path="model.joblib", threshold=0.6):
 
     # Feature importance del modelo base LightGBM dentro del calibrado
     # LGBM usa .feature_importances_ igual que scikit-learn
-    importances_array = np.mean([clf.estimator.feature_importances_ for clf in model.calibrated_classifiers_], axis=0)
+    importances_array = np.mean(
+        [clf.estimator.feature_importances_ for clf in model.calibrated_classifiers_],
+        axis=0,
+    )
     importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\n📊 Top 10 features más importantes:")

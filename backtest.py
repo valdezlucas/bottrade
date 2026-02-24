@@ -8,13 +8,14 @@ Simula operaciones reales con:
 - Costos reales (spread, slippage, swap)
 - Equity curve y métricas de rendimiento
 """
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 
+from costs import TradingCosts
 from data import load_data
 from fractals import detect_fractals
-from costs import TradingCosts
 
 
 class Trade:
@@ -52,17 +53,28 @@ class Trade:
 
     def __repr__(self):
         status = "OPEN" if self.is_open() else f"CLOSED ({self.exit_reason})"
-        return (f"Trade({self.direction} @ {self.entry_price:.5f} | "
-                f"SL: {self.sl:.5f} | TP: {self.tp:.5f} | {status} | "
-                f"PnL: {self.pnl if self.pnl else 'N/A'})")
+        return (
+            f"Trade({self.direction} @ {self.entry_price:.5f} | "
+            f"SL: {self.sl:.5f} | TP: {self.tp:.5f} | {status} | "
+            f"PnL: {self.pnl if self.pnl else 'N/A'})"
+        )
 
 
-def run_backtest(data_path, model_path="model.joblib", sell_model_path=None,
-                 initial_balance=10000,
-                 risk_per_trade=0.005, rr_ratio=1.5, atr_sl_multiplier=1.0,
-                 max_drawdown_pct=20.0,
-                 spread_pips=1.5, max_slippage_pips=1.0, swap_per_night=0.0,
-                 pip_value=0.0001, lot_size=100000):
+def run_backtest(
+    data_path,
+    model_path="model.joblib",
+    sell_model_path=None,
+    initial_balance=10000,
+    risk_per_trade=0.005,
+    rr_ratio=1.5,
+    atr_sl_multiplier=1.0,
+    max_drawdown_pct=20.0,
+    spread_pips=1.5,
+    max_slippage_pips=1.0,
+    swap_per_night=0.0,
+    pip_value=0.0001,
+    lot_size=100000,
+):
     """
     Ejecuta el backtest completo.
 
@@ -173,12 +185,18 @@ def run_backtest(data_path, model_path="model.joblib", sell_model_path=None,
             # SL tiene prioridad (peor caso)
             if hit_sl:
                 exit_price = current_trade.sl
-                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(current_trade.nights)
-                current_trade.close(i, exit_price, "SL", exit_cost, current_trade.nights)
+                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(
+                    current_trade.nights
+                )
+                current_trade.close(
+                    i, exit_price, "SL", exit_cost, current_trade.nights
+                )
 
                 # Calcular P&L en USD
                 pips_pnl = current_trade.pnl / pip_value
-                position_size = (balance * risk_per_trade) / (atr_sl_multiplier * atr / pip_value)
+                position_size = (balance * risk_per_trade) / (
+                    atr_sl_multiplier * atr / pip_value
+                )
                 usd_pnl = pips_pnl * position_size * pip_value * lot_size
                 balance += usd_pnl
                 trades.append(current_trade)
@@ -186,18 +204,26 @@ def run_backtest(data_path, model_path="model.joblib", sell_model_path=None,
 
             elif hit_tp:
                 exit_price = current_trade.tp
-                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(current_trade.nights)
-                current_trade.close(i, exit_price, "TP", exit_cost, current_trade.nights)
+                exit_cost = costs_sim.exit_cost() + costs_sim.holding_cost(
+                    current_trade.nights
+                )
+                current_trade.close(
+                    i, exit_price, "TP", exit_cost, current_trade.nights
+                )
 
                 pips_pnl = current_trade.pnl / pip_value
-                position_size = (balance * risk_per_trade) / (atr_sl_multiplier * atr / pip_value)
+                position_size = (balance * risk_per_trade) / (
+                    atr_sl_multiplier * atr / pip_value
+                )
                 usd_pnl = pips_pnl * position_size * pip_value * lot_size
                 balance += usd_pnl
                 trades.append(current_trade)
                 current_trade = None
 
         # --- Drawdown breaker check ---
-        current_dd = (peak_balance - balance) / peak_balance * 100 if peak_balance > 0 else 0
+        current_dd = (
+            (peak_balance - balance) / peak_balance * 100 if peak_balance > 0 else 0
+        )
         if current_dd >= max_drawdown_pct and not dd_breaker_triggered:
             dd_breaker_triggered = True
             dd_breaker_bar = i
@@ -233,7 +259,9 @@ def run_backtest(data_path, model_path="model.joblib", sell_model_path=None,
                     sl_price = entry_price + sl_distance
                     tp_price = entry_price - tp_distance
 
-                current_trade = Trade(i, signal, entry_price, sl_price, tp_price, entry_cost)
+                current_trade = Trade(
+                    i, signal, entry_price, sl_price, tp_price, entry_cost
+                )
 
         # Actualizar equity curve
         equity_curve.append(balance)
@@ -242,10 +270,12 @@ def run_backtest(data_path, model_path="model.joblib", sell_model_path=None,
     # Cerrar trade abierto al final
     if current_trade is not None and current_trade.is_open():
         exit_cost = costs_sim.exit_cost()
-        current_trade.close(len(df)-1, df["Close"].iloc[-1], "END", exit_cost)
+        current_trade.close(len(df) - 1, df["Close"].iloc[-1], "END", exit_cost)
         pips_pnl = current_trade.pnl / pip_value
         atr_last = df["ATR"].iloc[-1]
-        position_size = (balance * risk_per_trade) / (atr_sl_multiplier * atr_last / pip_value)
+        position_size = (balance * risk_per_trade) / (
+            atr_sl_multiplier * atr_last / pip_value
+        )
         usd_pnl = pips_pnl * position_size * pip_value * lot_size
         balance += usd_pnl
         trades.append(current_trade)
@@ -364,8 +394,10 @@ def _compute_results(trades, equity_curve, initial_balance, final_balance):
         emoji = "BUY " if t.direction == "BUY" else "SELL"
         result = "WIN " if t.pnl and t.pnl > 0 else "LOSS"
         pnl_str = f"{t.pnl:+.6f}" if t.pnl else "N/A"
-        print(f"  [{t.entry_idx:5d}] {emoji} @ {t.entry_price:.5f} -> "
-              f"{t.exit_reason} @ {t.exit_price:.5f} | {result} {pnl_str}")
+        print(
+            f"  [{t.entry_idx:5d}] {emoji} @ {t.entry_price:.5f} -> "
+            f"{t.exit_reason} @ {t.exit_price:.5f} | {result} {pnl_str}"
+        )
 
     metrics = {
         "n_trades": n_trades,

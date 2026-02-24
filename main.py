@@ -10,10 +10,10 @@ Uso:
 import argparse
 import sys
 
-from train import prepare_dataset, walk_forward_train, train_final_model
-from predict import predict as run_predict
-from costs import TradingCosts
 from backtest import run_backtest
+from costs import TradingCosts
+from predict import predict as run_predict
+from train import prepare_dataset, train_final_model, walk_forward_train
 
 
 def cmd_train(args):
@@ -28,8 +28,10 @@ def cmd_train(args):
     df = prepare_dataset(args.data, lookahead=args.lookahead, rr=args.rr)
 
     if len(df) < 500:
-        print(f"\n⚠️  ADVERTENCIA: Solo {len(df)} filas. Se recomiendan mínimo 500 "
-              "para walk-forward con 4 folds.")
+        print(
+            f"\n⚠️  ADVERTENCIA: Solo {len(df)} filas. Se recomiendan mínimo 500 "
+            "para walk-forward con 4 folds."
+        )
 
     # Walk-forward validation - Expandimos para buscar mayor densidad de señales
     thresholds = [0.45, 0.47, 0.49, 0.51, 0.53, 0.55]
@@ -47,9 +49,15 @@ def cmd_train(args):
         print(f"  ⚠️  {invalid_folds} folds inválidos (< 30 trades)")
 
     if valid_folds:
-        avg_expectancy = sum(r["best_metrics"]["expectancy"] for r in valid_folds) / len(valid_folds)
-        avg_pf = sum(r["best_metrics"]["profit_factor"] for r in valid_folds) / len(valid_folds)
-        avg_sharpe = sum(r["best_metrics"]["sharpe_ratio"] for r in valid_folds) / len(valid_folds)
+        avg_expectancy = sum(
+            r["best_metrics"]["expectancy"] for r in valid_folds
+        ) / len(valid_folds)
+        avg_pf = sum(r["best_metrics"]["profit_factor"] for r in valid_folds) / len(
+            valid_folds
+        )
+        avg_sharpe = sum(r["best_metrics"]["sharpe_ratio"] for r in valid_folds) / len(
+            valid_folds
+        )
 
         # Threshold más frecuente o promedio
         best_thresholds = [r["best_threshold"] for r in valid_folds]
@@ -102,31 +110,91 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Comandos disponibles")
 
     # --- Train ---
-    train_parser = subparsers.add_parser("train", help="Entrenar modelo con walk-forward")
-    train_parser.add_argument("--data", required=True, help="Path al CSV con datos OHLC(V)")
-    train_parser.add_argument("--model", default="model.joblib", help="Path para guardar el modelo")
-    train_parser.add_argument("--spread", type=float, default=1.5, help="Spread en pips (default: 1.5)")
-    train_parser.add_argument("--slippage", type=float, default=1.0, help="Max slippage en pips (default: 1.0)")
-    train_parser.add_argument("--swap", type=float, default=0.0, help="Swap por noche (default: 0)")
-    train_parser.add_argument("--rr", type=float, default=1.5, help="Ratio reward:risk (default: 1.5)")
-    train_parser.add_argument("--lookahead", type=int, default=20, help="Ventana de lookahead para labels (default: 20)")
+    train_parser = subparsers.add_parser(
+        "train", help="Entrenar modelo con walk-forward"
+    )
+    train_parser.add_argument(
+        "--data", required=True, help="Path al CSV con datos OHLC(V)"
+    )
+    train_parser.add_argument(
+        "--model", default="model.joblib", help="Path para guardar el modelo"
+    )
+    train_parser.add_argument(
+        "--spread", type=float, default=1.5, help="Spread en pips (default: 1.5)"
+    )
+    train_parser.add_argument(
+        "--slippage",
+        type=float,
+        default=1.0,
+        help="Max slippage en pips (default: 1.0)",
+    )
+    train_parser.add_argument(
+        "--swap", type=float, default=0.0, help="Swap por noche (default: 0)"
+    )
+    train_parser.add_argument(
+        "--rr", type=float, default=1.5, help="Ratio reward:risk (default: 1.5)"
+    )
+    train_parser.add_argument(
+        "--lookahead",
+        type=int,
+        default=20,
+        help="Ventana de lookahead para labels (default: 20)",
+    )
 
     # --- Predict ---
-    predict_parser = subparsers.add_parser("predict", help="Predecir sobre datos nuevos")
-    predict_parser.add_argument("--data", required=True, help="Path al CSV con datos OHLC(V)")
-    predict_parser.add_argument("--model", default="model.joblib", help="Path al modelo guardado")
+    predict_parser = subparsers.add_parser(
+        "predict", help="Predecir sobre datos nuevos"
+    )
+    predict_parser.add_argument(
+        "--data", required=True, help="Path al CSV con datos OHLC(V)"
+    )
+    predict_parser.add_argument(
+        "--model", default="model.joblib", help="Path al modelo guardado"
+    )
 
     # --- Backtest ---
-    bt_parser = subparsers.add_parser("backtest", help="Simular trades con el modelo entrenado")
-    bt_parser.add_argument("--data", required=True, help="Path al CSV con datos OHLC(V)")
-    bt_parser.add_argument("--model", default="model.joblib", help="Path al modelo guardado")
-    bt_parser.add_argument("--balance", type=float, default=10000, help="Capital inicial USD (default: 10000)")
-    bt_parser.add_argument("--risk", type=float, default=0.01, help="Riesgo por trade como decimal (default: 0.01 = 1%%)")
-    bt_parser.add_argument("--rr", type=float, default=1.5, help="Ratio reward:risk (default: 1.5)")
-    bt_parser.add_argument("--sl-atr", type=float, default=1.0, help="Multiplicador ATR para SL (default: 1.0)")
-    bt_parser.add_argument("--spread", type=float, default=1.5, help="Spread en pips (default: 1.5)")
-    bt_parser.add_argument("--slippage", type=float, default=1.0, help="Max slippage en pips (default: 1.0)")
-    bt_parser.add_argument("--swap", type=float, default=0.0, help="Swap por noche (default: 0)")
+    bt_parser = subparsers.add_parser(
+        "backtest", help="Simular trades con el modelo entrenado"
+    )
+    bt_parser.add_argument(
+        "--data", required=True, help="Path al CSV con datos OHLC(V)"
+    )
+    bt_parser.add_argument(
+        "--model", default="model.joblib", help="Path al modelo guardado"
+    )
+    bt_parser.add_argument(
+        "--balance",
+        type=float,
+        default=10000,
+        help="Capital inicial USD (default: 10000)",
+    )
+    bt_parser.add_argument(
+        "--risk",
+        type=float,
+        default=0.01,
+        help="Riesgo por trade como decimal (default: 0.01 = 1%%)",
+    )
+    bt_parser.add_argument(
+        "--rr", type=float, default=1.5, help="Ratio reward:risk (default: 1.5)"
+    )
+    bt_parser.add_argument(
+        "--sl-atr",
+        type=float,
+        default=1.0,
+        help="Multiplicador ATR para SL (default: 1.0)",
+    )
+    bt_parser.add_argument(
+        "--spread", type=float, default=1.5, help="Spread en pips (default: 1.5)"
+    )
+    bt_parser.add_argument(
+        "--slippage",
+        type=float,
+        default=1.0,
+        help="Max slippage en pips (default: 1.0)",
+    )
+    bt_parser.add_argument(
+        "--swap", type=float, default=0.0, help="Swap por noche (default: 0)"
+    )
 
     args = parser.parse_args()
 

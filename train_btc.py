@@ -8,26 +8,33 @@ Usage:
     python train_btc.py
 """
 
-import numpy as np
-import pandas as pd
-import joblib
-import yfinance as yf
 from datetime import datetime, timedelta
 
-from sklearn.ensemble import GradientBoostingClassifier
+import joblib
+import numpy as np
+import pandas as pd
+import yfinance as yf
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import GradientBoostingClassifier
 
 from features import create_features
 from fractals import detect_fractals
 from ml_dataset import label_data
 
-
 # Features que NO son input del modelo
 EXCLUDE_COLS = [
-    "Open", "High", "Low", "Close", "Volume",
-    "target", "potential_win", "potential_loss",
-    "fractal_high", "fractal_low",
-    "Datetime", "Date",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "target",
+    "potential_win",
+    "potential_loss",
+    "fractal_high",
+    "fractal_low",
+    "Datetime",
+    "Date",
 ]
 
 
@@ -123,7 +130,7 @@ def train_btc_daily():
             subsample=0.8,
             random_state=42,
         )
-        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
+        model = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
         model.fit(X_tr, y_tr)
 
         y_pred = model.predict(X_te)
@@ -162,7 +169,9 @@ def train_btc_daily():
                 best_exp = exp
                 best_th = th
 
-        print(f"  Fold {fold+1}: Train {train_end} | Test {test_end-train_end} → Exp: {best_exp:.6f}")
+        print(
+            f"  Fold {fold+1}: Train {train_end} | Test {test_end-train_end} → Exp: {best_exp:.6f}"
+        )
 
     print(f"\n🎯 Threshold óptimo: {best_th}")
 
@@ -178,14 +187,17 @@ def train_btc_daily():
         subsample=0.8,
         random_state=42,
     )
-    main_model = CalibratedClassifierCV(main_base, method='isotonic', cv=3)
+    main_model = CalibratedClassifierCV(main_base, method="isotonic", cv=3)
     main_model.fit(X_all, y_all)
 
-    joblib.dump({
-        "model": main_model,
-        "feature_columns": feature_cols,
-        "threshold": best_th,
-    }, "model_btc_daily.joblib")
+    joblib.dump(
+        {
+            "model": main_model,
+            "feature_columns": feature_cols,
+            "threshold": best_th,
+        },
+        "model_btc_daily.joblib",
+    )
     print(f"  💾 Modelo BUY guardado: model_btc_daily.joblib")
 
     # Modelo SELL (binario)
@@ -198,18 +210,27 @@ def train_btc_daily():
         subsample=0.8,
         random_state=42,
     )
-    sell_model = CalibratedClassifierCV(sell_base, method='isotonic', cv=3)
+    sell_model = CalibratedClassifierCV(sell_base, method="isotonic", cv=3)
     sell_model.fit(X_all, y_sell)
 
-    joblib.dump({
-        "model": sell_model,
-        "feature_columns": feature_cols,
-        "threshold": best_th,
-    }, "model_btc_daily_sell.joblib")
+    joblib.dump(
+        {
+            "model": sell_model,
+            "feature_columns": feature_cols,
+            "threshold": best_th,
+        },
+        "model_btc_daily_sell.joblib",
+    )
     print(f"  💾 Modelo SELL guardado: model_btc_daily_sell.joblib")
 
     # Feature importance
-    importances_array = np.mean([clf.estimator.feature_importances_ for clf in main_model.calibrated_classifiers_], axis=0)
+    importances_array = np.mean(
+        [
+            clf.estimator.feature_importances_
+            for clf in main_model.calibrated_classifiers_
+        ],
+        axis=0,
+    )
     importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\n📊 Top 10 features (BTC Daily):")

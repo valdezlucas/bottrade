@@ -7,12 +7,16 @@ Yahoo Finance permite:
 
 Para Forex, el ticker es: NZDUSD=X, EURUSD=X, etc.
 """
-import yfinance as yf
-import pandas as pd
+
 import sys
 
+import pandas as pd
+import yfinance as yf
 
-def download_forex(pair="NZDUSD", interval="1h", period=None, start=None, end=None, output=None):
+
+def download_forex(
+    pair="NZDUSD", interval="1h", period=None, start=None, end=None, output=None
+):
     """
     Descarga datos OHLCV de un par de Forex.
 
@@ -99,13 +103,21 @@ def download_forex(pair="NZDUSD", interval="1h", period=None, start=None, end=No
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Descargar datos Forex de Yahoo Finance")
+    parser = argparse.ArgumentParser(
+        description="Descargar datos Forex de Yahoo Finance"
+    )
     parser.add_argument("--pair", default="NZDUSD", help="Par forex (default: NZDUSD)")
-    parser.add_argument("--interval", default="1h", help="Intervalo: 1m, 5m, 15m, 1h, 1d (default: 1h)")
-    parser.add_argument("--period", default=None, help="Periodo: 1y, 2y, 5y, max (default: auto)")
+    parser.add_argument(
+        "--interval", default="1h", help="Intervalo: 1m, 5m, 15m, 1h, 1d (default: 1h)"
+    )
+    parser.add_argument(
+        "--period", default=None, help="Periodo: 1y, 2y, 5y, max (default: auto)"
+    )
     parser.add_argument("--start", default=None, help="Fecha inicio: YYYY-MM-DD")
     parser.add_argument("--end", default=None, help="Fecha fin: YYYY-MM-DD")
     parser.add_argument("--output", default=None, help="Archivo de salida")
 
     args = parser.parse_args()
-    download_forex(args.pair, args.interval, args.period, args.start, args.end, args.output)
+    download_forex(
+        args.pair, args.interval, args.period, args.start, args.end, args.output
+    )

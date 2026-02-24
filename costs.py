@@ -7,7 +7,13 @@ class TradingCosts:
     Todos los valores en unidades de precio (no pips).
     """
 
-    def __init__(self, spread_pips=1.5, max_slippage_pips=1.0, swap_per_night=0.0, pip_value=0.0001):
+    def __init__(
+        self,
+        spread_pips=1.5,
+        max_slippage_pips=1.0,
+        swap_per_night=0.0,
+        pip_value=0.0001,
+    ):
         """
         Args:
             spread_pips: Spread fijo del broker en pips

@@ -1,30 +1,32 @@
 """
 Entrena un modelo dedicado para señales SELL.
 
-El modelo principal tiende a sesgar BUY. Este modelo binario se enfoca 
+El modelo principal tiende a sesgar BUY. Este modelo binario se enfoca
 exclusivamente en detectar oportunidades de venta (short).
 
 Target binario: 0 = NO_SELL, 1 = SELL
 """
+
+import argparse
 import sys
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
-import argparse
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report
-from sklearn.calibration import CalibratedClassifierCV
 
+from costs import TradingCosts
+from evaluation import evaluate_signals, print_fold_report
 from features import create_features
 from fractals import detect_fractals
 from ml_dataset import label_data
 from train import get_feature_columns
-from costs import TradingCosts
-from evaluation import evaluate_signals, print_fold_report
 
 
 def prepare_sell_dataset(path, lookahead=20, rr=1.5):
@@ -43,7 +45,9 @@ def prepare_sell_dataset(path, lookahead=20, rr=1.5):
 
     n_sell = df["sell_target"].sum()
     n_total = len(df)
-    print(f"Datos: {n_total} filas | SELL: {n_sell} ({n_sell/n_total*100:.1f}%) | NO_SELL: {n_total-n_sell} ({(n_total-n_sell)/n_total*100:.1f}%)")
+    print(
+        f"Datos: {n_total} filas | SELL: {n_sell} ({n_sell/n_total*100:.1f}%) | NO_SELL: {n_total-n_sell} ({(n_total-n_sell)/n_total*100:.1f}%)"
+    )
 
     return df, feature_cols
 
@@ -69,7 +73,9 @@ def walk_forward_sell(df, feature_cols, n_folds=4, costs=None):
         df_train = df.iloc[:train_end]
         df_test = df.iloc[train_end:test_end]
 
-        print(f"\n--- Fold {fold+1}: Train [0:{train_end}] -> Test [{train_end}:{test_end}] ---")
+        print(
+            f"\n--- Fold {fold+1}: Train [0:{train_end}] -> Test [{train_end}:{test_end}] ---"
+        )
 
         X_train = df_train[feature_cols].values
         y_train = df_train["sell_target"].values
@@ -84,13 +90,17 @@ def walk_forward_sell(df, feature_cols, n_folds=4, costs=None):
             random_state=42,
             n_jobs=-1,
         )
-        model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
+        model = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
         model.fit(X_train, y_train)
 
         y_pred = model.predict(X_test)
         y_proba = model.predict_proba(X_test)
 
-        print(classification_report(y_test, y_pred, target_names=["NO_SELL", "SELL"], zero_division=0))
+        print(
+            classification_report(
+                y_test, y_pred, target_names=["NO_SELL", "SELL"], zero_division=0
+            )
+        )
 
         # Evaluar señales SELL: cuando predice SELL (1), el trade es short
         # Usar potential_win/loss del target original (SELL = target 2)
@@ -137,13 +147,17 @@ def walk_forward_sell(df, feature_cols, n_folds=4, costs=None):
             exp = (wr * avg_w) - ((1 - wr) * avg_l)
             pf = total_win / total_loss if total_loss > 0 else float("inf")
 
-            print(f"    th={th:.2f} -> {n_trades} trades | Exp: {exp:.6f} | PF: {pf:.4f}")
+            print(
+                f"    th={th:.2f} -> {n_trades} trades | Exp: {exp:.6f} | PF: {pf:.4f}"
+            )
 
             if exp > best_exp:
                 best_exp = exp
                 best_th = th
 
-        all_results.append({"fold": fold + 1, "best_threshold": best_th, "best_exp": best_exp})
+        all_results.append(
+            {"fold": fold + 1, "best_threshold": best_th, "best_exp": best_exp}
+        )
 
     return all_results
 
@@ -177,7 +191,7 @@ def train_sell_model(data_path, model_path="model_sell.joblib", lookahead=20, rr
         random_state=42,
         n_jobs=-1,
     )
-    model = CalibratedClassifierCV(base_model, method='isotonic', cv=3)
+    model = CalibratedClassifierCV(base_model, method="isotonic", cv=3)
     model.fit(X, y)
 
     artifact = {
@@ -189,7 +203,10 @@ def train_sell_model(data_path, model_path="model_sell.joblib", lookahead=20, rr
     print(f"Modelo SELL guardado: {model_path} (threshold: {optimal_th})")
 
     # Feature importance a partir del ensemble calibrado
-    importances_array = np.mean([clf.estimator.feature_importances_ for clf in model.calibrated_classifiers_], axis=0)
+    importances_array = np.mean(
+        [clf.estimator.feature_importances_ for clf in model.calibrated_classifiers_],
+        axis=0,
+    )
     importances = pd.Series(importances_array, index=feature_cols)
     importances = importances.sort_values(ascending=False)
     print(f"\nTop 10 features SELL:")

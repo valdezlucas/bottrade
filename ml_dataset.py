@@ -12,7 +12,7 @@ def label_data(df, lookahead=20, rr=1.5):
       - BUY:  potencial alcista > rr * ATR  Y  riesgo bajista < ATR
       - SELL: potencial bajista > rr * ATR  Y  riesgo alcista < ATR
 
-    También calcula avg_win y avg_loss potencial por señal para 
+    También calcula avg_win y avg_loss potencial por señal para
     poder calcular expectancy en la evaluación.
     """
 

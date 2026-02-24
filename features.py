@@ -1,8 +1,8 @@
-import pandas as pd
 import numpy as np
-from ta.volatility import AverageTrueRange, BollingerBands
+import pandas as pd
 from ta.momentum import RSIIndicator, StochRSIIndicator
 from ta.trend import MACD, ADXIndicator
+from ta.volatility import AverageTrueRange, BollingerBands
 from ta.volume import MFIIndicator
 
 
@@ -21,7 +21,9 @@ def create_features(df):
     df["EMA20"] = df["Close"].ewm(span=20).mean()
     df["EMA50"] = df["Close"].ewm(span=50).mean()
     df["EMA_slope"] = df["EMA20"].diff()
-    df["price_vs_EMA20"] = (df["Close"] - df["EMA20"]) / df["ATR"]  # Distancia normalizada
+    df["price_vs_EMA20"] = (df["Close"] - df["EMA20"]) / df[
+        "ATR"
+    ]  # Distancia normalizada
     df["price_vs_EMA50"] = (df["Close"] - df["EMA50"]) / df["ATR"]
     df["EMA_cross"] = df["EMA20"] - df["EMA50"]  # Positivo = bullish
 
@@ -71,8 +73,12 @@ def create_features(df):
     # Rango total de la vela normalizado
     df["candle_range"] = hl_range / df["ATR"].replace(0, np.nan)
     # Ratio de mechas — detecta rechazo (hammer, shooting star)
-    df["upper_wick_ratio"] = (df["High"] - df[["Open", "Close"]].max(axis=1)) / (hl_range + 1e-10)
-    df["lower_wick_ratio"] = (df[["Open", "Close"]].min(axis=1) - df["Low"]) / (hl_range + 1e-10)
+    df["upper_wick_ratio"] = (df["High"] - df[["Open", "Close"]].max(axis=1)) / (
+        hl_range + 1e-10
+    )
+    df["lower_wick_ratio"] = (df[["Open", "Close"]].min(axis=1) - df["Low"]) / (
+        hl_range + 1e-10
+    )
 
     # --- C. Fibonacci Retracement (posición en swing reciente) ---
     df["swing_high_20"] = df["High"].rolling(20).max()
@@ -84,16 +90,22 @@ def create_features(df):
         0.5,
     )
     # ¿Estamos en zona Fibonacci clave?
-    df["at_fib_618"] = ((df["fib_position"] > 0.55) & (df["fib_position"] < 0.68)).astype(int)
-    df["at_fib_382"] = ((df["fib_position"] > 0.33) & (df["fib_position"] < 0.45)).astype(int)
+    df["at_fib_618"] = (
+        (df["fib_position"] > 0.55) & (df["fib_position"] < 0.68)
+    ).astype(int)
+    df["at_fib_382"] = (
+        (df["fib_position"] > 0.33) & (df["fib_position"] < 0.45)
+    ).astype(int)
     # Limpiar columnas auxiliares
     df.drop(columns=["swing_high_20", "swing_low_20"], inplace=True)
 
     # --- D. EMA50 Confluencia (pendiente + proximidad) ---
-    df["EMA50_slope"] = df["EMA50"].diff(3) / df["ATR"].replace(0, np.nan)  # pendiente 3 barras
-    df["EMA50_touch"] = (
-        (df["Close"] - df["EMA50"]).abs() < df["ATR"] * 0.3
-    ).astype(int)
+    df["EMA50_slope"] = df["EMA50"].diff(3) / df["ATR"].replace(
+        0, np.nan
+    )  # pendiente 3 barras
+    df["EMA50_touch"] = ((df["Close"] - df["EMA50"]).abs() < df["ATR"] * 0.3).astype(
+        int
+    )
     df["EMA50_slope_pos"] = (df["EMA50_slope"] > 0).astype(int)
 
     # --- F. Nuevos Features de Sensibilidad (Phase 2 Refinement) ---
@@ -111,14 +123,22 @@ def create_features(df):
 
     # MFI (Money Flow Index): RSI pesado por volumen
     if "Volume" in df.columns and df["Volume"].sum() > 0:
-        mfi = MFIIndicator(high=df["High"], low=df["Low"], close=df["Close"], volume=df["Volume"], window=14)
+        mfi = MFIIndicator(
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+            volume=df["Volume"],
+            window=14,
+        )
         df["MFI"] = mfi.money_flow_index()
     else:
-        df["MFI"] = df["RSI"] # Fallback
+        df["MFI"] = df["RSI"]  # Fallback
 
     # Bollinger Band Squeeze: Detecta compresión de volatilidad
     # Ratio entre BB_width actual y su media de 100 periodos
-    df["BB_squeeze"] = df["BB_width"] / df["BB_width"].rolling(100).mean().replace(0, np.nan)
+    df["BB_squeeze"] = df["BB_width"] / df["BB_width"].rolling(100).mean().replace(
+        0, np.nan
+    )
 
     # --- Fractal features (distancia al último fractal) ---
     df = _add_fractal_distance_features(df)
@@ -129,13 +149,13 @@ def create_features(df):
     # --- G. Seasonality / Time Features ---
     if "Datetime" in df.columns:
         dt = pd.to_datetime(df["Datetime"])
-        
+
         # Day of week (0 = Monday, 6 = Sunday)
         # Using 7 days for full circularity, though forex/stocks trade 5 days
         day_of_week = dt.dt.dayofweek
         df["sin_day"] = np.sin(2 * np.pi * day_of_week / 7)
         df["cos_day"] = np.cos(2 * np.pi * day_of_week / 7)
-        
+
         # Month of year (1-12)
         month = dt.dt.month
         df["sin_month"] = np.sin(2 * np.pi * month / 12)
@@ -167,11 +187,11 @@ def _add_fractal_distance_features(df):
 
     for i in range(len(df)):
         if df["fractal_high"].iloc[i]:
-            last_fh_idx = i - 2 # El pico real fue hace 2 velas
+            last_fh_idx = i - 2  # El pico real fue hace 2 velas
             last_fh_price = df["High"].iloc[last_fh_idx]
 
         if df["fractal_low"].iloc[i]:
-            last_fl_idx = i - 2 # El piso real fue hace 2 velas
+            last_fl_idx = i - 2  # El piso real fue hace 2 velas
             last_fl_price = df["Low"].iloc[last_fl_idx]
 
         atr_val = df["ATR"].iloc[i]
@@ -208,15 +228,15 @@ def _add_structure_features(df):
 
     for i in range(len(df)):
         if df["fractal_high"].iloc[i]:
-            fh_prices.append(df["High"].iloc[i-2]) # Guardar precio real del pico
+            fh_prices.append(df["High"].iloc[i - 2])  # Guardar precio real del pico
         if df["fractal_low"].iloc[i]:
-            fl_prices.append(df["Low"].iloc[i-2]) # Guardar precio real del valle
+            fl_prices.append(df["Low"].iloc[i - 2])  # Guardar precio real del valle
 
         if len(fh_prices) >= 2 and len(fl_prices) >= 2:
             hh = fh_prices[-1] > fh_prices[-2]  # Higher High
-            hl = fl_prices[-1] > fl_prices[-2]   # Higher Low
-            lh = fh_prices[-1] < fh_prices[-2]   # Lower High
-            ll = fl_prices[-1] < fl_prices[-2]    # Lower Low
+            hl = fl_prices[-1] > fl_prices[-2]  # Higher Low
+            lh = fh_prices[-1] < fh_prices[-2]  # Lower High
+            ll = fl_prices[-1] < fl_prices[-2]  # Lower Low
 
             if hh and hl:
                 current_dir = 1  # bullish

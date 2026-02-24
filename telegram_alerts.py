@@ -11,12 +11,14 @@ Configuración inicial:
 Integración con el scanner:
   python live_scanner.py   (ya integrado automáticamente)
 """
+
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-import requests
 from datetime import datetime
+
+import requests
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -81,25 +83,45 @@ def setup():
 
         print(".", end="", flush=True)
         import time
+
         time.sleep(2)
 
     print(f"\n\n  ⏱️ Timeout — mandá un mensaje al bot e intentá de nuevo.")
     return None
 
 
-def send_signal_alert(pair, signal, entry, sl, tp, sl_pips, tp_pips,
-                      confidence, risk_usd, volume, atr_pips):
+def send_signal_alert(
+    pair,
+    signal,
+    entry,
+    sl,
+    tp,
+    sl_pips,
+    tp_pips,
+    confidence,
+    risk_usd,
+    volume,
+    atr_pips,
+):
     """Envía alerta de señal al Telegram."""
     chat_id = get_chat_id()
     if not chat_id:
-        print("  ⚠️ Telegram sin configurar. Ejecutá: python telegram_alerts.py --setup")
+        print(
+            "  ⚠️ Telegram sin configurar. Ejecutá: python telegram_alerts.py --setup"
+        )
         return False
 
     emoji_signal = "🟢 BUY" if signal == "BUY" else "🔴 SELL"
     emoji_pair = {
-        "EURUSD": "🇪🇺🇺🇸", "GBPUSD": "🇬🇧🇺🇸", "AUDUSD": "🇦🇺🇺🇸",
-        "NZDUSD": "🇳🇿🇺🇸", "USDCAD": "🇺🇸🇨🇦", "USDCHF": "🇺🇸🇨🇭",
-        "EURGBP": "🇪🇺🇬🇧", "EURJPY": "🇪🇺🇯🇵", "EURNZD": "🇪🇺🇳🇿",
+        "EURUSD": "🇪🇺🇺🇸",
+        "GBPUSD": "🇬🇧🇺🇸",
+        "AUDUSD": "🇦🇺🇺🇸",
+        "NZDUSD": "🇳🇿🇺🇸",
+        "USDCAD": "🇺🇸🇨🇦",
+        "USDCHF": "🇺🇸🇨🇭",
+        "EURGBP": "🇪🇺🇬🇧",
+        "EURJPY": "🇪🇺🇯🇵",
+        "EURNZD": "🇪🇺🇳🇿",
     }.get(pair, "💱")
 
     text = (
@@ -120,11 +142,14 @@ def send_signal_alert(pair, signal, entry, sl, tp, sl_pips, tp_pips,
         f"📁 _Registrado en trade\\_journal.csv_"
     )
 
-    result = _api("sendMessage", json_data={
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "MarkdownV2",
-    })
+    result = _api(
+        "sendMessage",
+        json_data={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "MarkdownV2",
+        },
+    )
 
     if result.get("ok"):
         print(f"  📱 Telegram alert enviada")
@@ -145,11 +170,14 @@ def send_no_signals_alert():
         f"El scanner revisó 7 pares y todos están en HOLD\\.\n"
         f"_Próximo scan: mañana al cierre de vela diaria\\._"
     )
-    _api("sendMessage", json_data={
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "MarkdownV2",
-    })
+    _api(
+        "sendMessage",
+        json_data={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "MarkdownV2",
+        },
+    )
 
 
 def send_test_alert():
@@ -168,11 +196,14 @@ def send_test_alert():
         "💰 _Riesgo: 0\\.5% por trade_"
     )
 
-    result = _api("sendMessage", json_data={
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "MarkdownV2",
-    })
+    result = _api(
+        "sendMessage",
+        json_data={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "MarkdownV2",
+        },
+    )
 
     if result.get("ok"):
         print(f"  ✅ Mensaje de prueba enviado a chat_id: {chat_id}")
@@ -186,7 +217,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Telegram Alerts")
     parser.add_argument("--setup", action="store_true", help="Configurar chat_id")
     parser.add_argument("--test", action="store_true", help="Enviar mensaje de prueba")
-    parser.add_argument("--no-signals", action="store_true", help="Enviar alerta de no-señales")
+    parser.add_argument(
+        "--no-signals", action="store_true", help="Enviar alerta de no-señales"
+    )
     args = parser.parse_args()
 
     if args.setup:
