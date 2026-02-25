@@ -328,7 +328,7 @@ def run_scan(timeframe="Daily"):
 
     # Configuración de descarga por timeframe
     if timeframe == "4H":
-        yf_interval, yf_days = "1h", 30  # descarga 1h y resamplea
+        yf_interval, yf_days = "1h", 90  # descarga 1h y resamplea
     elif timeframe == "BTC_Daily":
         yf_interval, yf_days = "1d", 120
     else:
