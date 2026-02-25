@@ -258,6 +258,10 @@ def tg_get_updates(offset=None):
         data = r.json()
         if data.get("ok"):
             return data["result"]
+    except requests.exceptions.ReadTimeout:
+        log.warning("Telegram API timeout (ReadTimeout). Retrying...")
+    except requests.exceptions.ConnectionError:
+        log.warning("Telegram API ConnectionError. Retrying...")
     except Exception as e:
         log.error(f"Error getUpdates: {e}")
     return []
