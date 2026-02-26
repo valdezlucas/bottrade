@@ -276,54 +276,86 @@ def tg_get_updates(offset=None):
 
 # ─── ML Scanner ────────────────────────────────────────────────────────
 def download_data(ticker, days=120, interval="1d"):
-    """Descarga datos históricos vía MetaTrader 5."""
+    """Descarga datos históricos vía MetaTrader 5 o YFinance como fallback."""
+    import pandas as pd
+    from datetime import timedelta, datetime
+    
+    mt5_success = False
     try:
         import MetaTrader5 as mt5
-        import pandas as pd
+        if mt5.initialize():
+            mt5_success = True
+    except ImportError:
+        pass
         
-        if not mt5.initialize():
-            log.error(f"MT5 init failed: {mt5.last_error()}")
-            return None
-            
-        if interval == "1d":
-            mt5_tf = mt5.TIMEFRAME_D1
-            bars = days
-        elif interval == "1h":
-            mt5_tf = mt5.TIMEFRAME_H1
-            bars = days * 24
-        elif interval == "4h":
-            mt5_tf = mt5.TIMEFRAME_H4
-            bars = days * 6
-        elif interval == "15m":
-            mt5_tf = mt5.TIMEFRAME_M15
-            bars = days * 96
-        elif interval == "1m":
-            mt5_tf = mt5.TIMEFRAME_M1
-            bars = days * 1440
-        else:
-            mt5_tf = mt5.TIMEFRAME_D1
-            bars = days
-            
-        rates = mt5.copy_rates_from_pos(ticker, mt5_tf, 0, bars)
-        if rates is None or len(rates) == 0:
-            return None
-            
-        df = pd.DataFrame(rates)
-        df["time"] = pd.to_datetime(df["time"], unit="s")
-        df = df.rename(
-            columns={
-                "time": "Datetime",
-                "open": "Open",
-                "high": "High",
-                "low": "Low",
-                "close": "Close",
-                "tick_volume": "Volume",
-            }
-        )
-        return df[["Datetime", "Open", "High", "Low", "Close", "Volume"]]
-    except Exception as e:
-        log.error(f"Error MT5 download: {e}")
+    if mt5_success:
+        try:
+            if interval == "1d":
+                mt5_tf = mt5.TIMEFRAME_D1
+                bars = days
+            elif interval == "1h":
+                mt5_tf = mt5.TIMEFRAME_H1
+                bars = days * 24
+            elif interval == "4h":
+                mt5_tf = mt5.TIMEFRAME_H4
+                bars = days * 6
+            elif interval == "15m":
+                mt5_tf = mt5.TIMEFRAME_M15
+                bars = days * 96
+            elif interval == "1m":
+                mt5_tf = mt5.TIMEFRAME_M1
+                bars = days * 1440
+            else:
+                mt5_tf = mt5.TIMEFRAME_D1
+                bars = days
+                
+            rates = mt5.copy_rates_from_pos(ticker, mt5_tf, 0, bars)
+            if rates is not None and len(rates) > 0:
+                df = pd.DataFrame(rates)
+                df["time"] = pd.to_datetime(df["time"], unit="s")
+                df = df.rename(
+                    columns={
+                        "time": "Datetime",
+                        "open": "Open",
+                        "high": "High",
+                        "low": "Low",
+                        "close": "Close",
+                        "tick_volume": "Volume",
+                    }
+                )
+                return df[["Datetime", "Open", "High", "Low", "Close", "Volume"]]
+        except Exception as e:
+            log.warning(f"Error MT5 download for {ticker}: {e}. Intentando fallback...")
+
+    # Fallback YFinance
+    import yfinance as yf
+    yf_ticker = ticker
+    if ticker == "BTCUSD":
+        yf_ticker = "BTC-USD"
+    elif len(ticker) == 6 and ticker not in ["MSFT", "TSLA", "PG", "XOM"]:
+        yf_ticker = f"{ticker}=X"
+
+    end = datetime.now()
+    start = end - timedelta(days=days)
+    df = yf.download(
+        yf_ticker,
+        start=start.strftime("%Y-%m-%d"),
+        end=end.strftime("%Y-%m-%d"),
+        interval=interval,
+        progress=False,
+    )
+    if df.empty:
         return None
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = df.reset_index()
+    if "Date" in df.columns:
+        df = df.rename(columns={"Date": "Datetime"})
+    elif "index" in df.columns:
+        df = df.rename(columns={"index": "Datetime"})
+    return (
+        df if all(c in df.columns for c in ["Open", "High", "Low", "Close"]) else None
+    )
 
 
 def resample_to_4h(df_1h):
@@ -909,20 +941,49 @@ def handle_action(chat_id, action):
     elif action == "cmd_price":
         tg_send(chat_id, "💰 *Consultando precios actuales\\.\\.\\.*")
         msg = "📊 *Precios en Vivo*\n━━━━━━━━━━━━━━━━━━━━\n"
-        import MetaTrader5 as mt5
-        if mt5.initialize():
-            for pair, config in PAIRS.items():
-                try:
+        
+        mt5_success = False
+        try:
+            import MetaTrader5 as mt5
+            if mt5.initialize():
+                mt5_success = True
+        except ImportError:
+            pass
+
+        import yfinance as yf
+        import pandas as pd
+        
+        for pair, config in PAIRS.items():
+            try:
+                flag = PAIR_FLAGS.get(pair, "💱")
+                last_price = None
+                
+                if mt5_success:
                     tick = mt5.symbol_info_tick(config["ticker"])
                     if tick is not None:
                         last_price = tick.bid
-                        flag = PAIR_FLAGS.get(pair, "💱")
-                        msg += f"{flag} *{pair}:* `{float(last_price):.{config['decimals']}f}`\n"
-                except Exception as e:
-                    log.error(f"Error price {pair}: {e}")
-            msg += "━━━━━━━━━━━━━━━━━━━━\n_Datos vía MetaTrader 5_"
+                
+                if last_price is None:
+                    yf_ticker = config["ticker"]
+                    if len(yf_ticker) == 6 and yf_ticker not in ["MSFT", "TSLA", "PG", "XOM"]:
+                        yf_ticker = f"{yf_ticker}=X"
+                        
+                    df = yf.download(yf_ticker, period="1d", interval="1m", progress=False)
+                    if df is not None and not df.empty:
+                        last_price = df["Close"].iloc[-1]
+                        if isinstance(last_price, pd.Series):
+                            last_price = last_price.iloc[0]
+                
+                if last_price is not None:
+                    msg += f"{flag} *{pair}:* `{float(last_price):.{config['decimals']}f}`\n"
+            except Exception as e:
+                log.error(f"Error price {pair}: {e}")
+                
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        if mt5_success:
+            msg += "_Datos vía MetaTrader 5_"
         else:
-            msg += "_Error al conectar a MetaTrader 5_"
+            msg += "_Datos vía Yahoo Finance_"
         tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_active":
