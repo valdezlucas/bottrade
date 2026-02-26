@@ -81,6 +81,10 @@ PAIRS = {
     "USDJPY": {"ticker": "USDJPY=X", "spread": 1.2, "pip": 0.01, "decimals": 3},
     "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01, "decimals": 3},
     "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01, "decimals": 3},
+    # Pares Cruzados Nuevos (PF > 1.2 OOS)
+    "EURGBP": {"ticker": "EURGBP=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "EURAUD": {"ticker": "EURAUD=X", "spread": 2.0, "pip": 0.0001, "decimals": 5},
+    "GBPAUD": {"ticker": "GBPAUD=X", "spread": 2.5, "pip": 0.0001, "decimals": 5},
     # Acciones Robustas (PF > 1.3)
     "MSFT": {"ticker": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
     "TSLA": {"ticker": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
@@ -102,6 +106,9 @@ PAIR_FLAGS = {
     "USDJPY": "🇺🇸🇯🇵",
     "EURJPY": "🇪🇺🇯🇵",
     "GBPJPY": "🇬🇧🇯🇵",
+    "EURGBP": "🇪🇺🇬🇧",
+    "EURAUD": "🇪🇺🇦🇺",
+    "GBPAUD": "🇬🇧🇦🇺",
     "BTCUSD": "₿",
     "MSFT": "💻",
     "TSLA": "🚗",
