@@ -521,7 +521,7 @@ def build_signal_message(s):
         return str(v).replace(".", "\\.").replace("-", "\\-").replace("+", "\\+")
 
     text = (
-        f"⚡ *SEÑAL ML* {tf_emoji} *{tf}* — {datetime.now().strftime('%H:%M %d/%m/%Y')}\n\n"
+        f"⚡ *SEÑAL ML* {tf_emoji} *{tf}* — {esc(datetime.now().strftime('%H:%M %d/%m/%Y'))}\n\n"
         f"{flag} *{s['pair']}* — {emoji}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📍 *Entry:*    `{esc(s['entry'])}`\n"
@@ -529,10 +529,10 @@ def build_signal_message(s):
         f"🎯 *TP:*       `{esc(s['tp'])}`  \\({s['tp_pips']:.0f} pips\\)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 *ATR:*      {s['atr_pips']:.0f} pips  \\|  *R:R* 1:1\\.5\n"
-        f"🤖 *Confianza:* {s['confidence']:.0%}\n"
+        f"🤖 *Confianza:* {esc(str(round(s['confidence'] * 100)) + '%')}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *Volumen ref:*   {s['volume']:.2f} lotes\n"
-        f"⚠️  *Riesgo ref:*   ${s['risk_usd']:.0f}  \\({(s['risk_usd']/10000)*100:.1f}% de $10k\\)\n"
+        f"💰 *Volumen ref:*   {esc(round(s['volume'], 2))} lotes\n"
+        f"⚠️  *Riesgo ref:*   ${s['risk_usd']:.0f}  \\({esc(round((s['risk_usd']/10000)*100, 1))}% de $10k\\)\n"
         f"✅ *Si TP:*    \\+${s['risk_usd'] * 1.5:.0f}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"_Ajustá lotes según tu capital\\._"
