@@ -73,18 +73,18 @@ DEFAULT_BALANCE = 10000  # Balance de referencia para calcular lotes
 # Pares a escanear (Solo los que pasaron validación OOS 2022-2026)
 PAIRS = {
     # Forex Robusto (PF > 1.3)
-    "GBPUSD": {"ticker": "GBPUSD=X", "spread": 1.2, "pip": 0.0001, "decimals": 5},
-    "NZDUSD": {"ticker": "NZDUSD=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "AUDUSD": {"ticker": "AUDUSD=X", "spread": 1.2, "pip": 0.0001, "decimals": 5},
-    "USDCAD": {"ticker": "USDCAD=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "USDCHF": {"ticker": "USDCHF=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "USDJPY": {"ticker": "USDJPY=X", "spread": 1.2, "pip": 0.01, "decimals": 3},
-    "EURJPY": {"ticker": "EURJPY=X", "spread": 1.5, "pip": 0.01, "decimals": 3},
-    "GBPJPY": {"ticker": "GBPJPY=X", "spread": 2.0, "pip": 0.01, "decimals": 3},
+    "GBPUSD": {"ticker": "GBPUSD", "spread": 1.2, "pip": 0.0001, "decimals": 5},
+    "NZDUSD": {"ticker": "NZDUSD", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "AUDUSD": {"ticker": "AUDUSD", "spread": 1.2, "pip": 0.0001, "decimals": 5},
+    "USDCAD": {"ticker": "USDCAD", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "USDCHF": {"ticker": "USDCHF", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "USDJPY": {"ticker": "USDJPY", "spread": 1.2, "pip": 0.01, "decimals": 3},
+    "EURJPY": {"ticker": "EURJPY", "spread": 1.5, "pip": 0.01, "decimals": 3},
+    "GBPJPY": {"ticker": "GBPJPY", "spread": 2.0, "pip": 0.01, "decimals": 3},
     # Pares Cruzados Nuevos (PF > 1.2 OOS)
-    "EURGBP": {"ticker": "EURGBP=X", "spread": 1.5, "pip": 0.0001, "decimals": 5},
-    "EURAUD": {"ticker": "EURAUD=X", "spread": 2.0, "pip": 0.0001, "decimals": 5},
-    "GBPAUD": {"ticker": "GBPAUD=X", "spread": 2.5, "pip": 0.0001, "decimals": 5},
+    "EURGBP": {"ticker": "EURGBP", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "EURAUD": {"ticker": "EURAUD", "spread": 2.0, "pip": 0.0001, "decimals": 5},
+    "GBPAUD": {"ticker": "GBPAUD", "spread": 2.5, "pip": 0.0001, "decimals": 5},
     # Acciones Robustas (PF > 1.3)
     "MSFT": {"ticker": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
     "TSLA": {"ticker": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
@@ -94,7 +94,7 @@ PAIRS = {
 
 # Bitcoin — par separado con modelo propio
 BTC_PAIRS = {
-    "BTCUSD": {"ticker": "BTC-USD", "spread": 30.0, "pip": 1.0, "decimals": 2},
+    "BTCUSD": {"ticker": "BTCUSD", "spread": 30.0, "pip": 1.0, "decimals": 2},
 }
 
 PAIR_FLAGS = {
@@ -276,32 +276,54 @@ def tg_get_updates(offset=None):
 
 # ─── ML Scanner ────────────────────────────────────────────────────────
 def download_data(ticker, days=120, interval="1d"):
-    """Descarga datos de Yahoo Finance para cualquier timeframe."""
-    from datetime import timedelta
-
-    import yfinance as yf
-
-    end = datetime.now()
-    start = end - timedelta(days=days)
-    df = yf.download(
-        ticker,
-        start=start.strftime("%Y-%m-%d"),
-        end=end.strftime("%Y-%m-%d"),
-        interval=interval,
-        progress=False,
-    )
-    if df.empty:
+    """Descarga datos históricos vía MetaTrader 5."""
+    try:
+        import MetaTrader5 as mt5
+        import pandas as pd
+        
+        if not mt5.initialize():
+            log.error(f"MT5 init failed: {mt5.last_error()}")
+            return None
+            
+        if interval == "1d":
+            mt5_tf = mt5.TIMEFRAME_D1
+            bars = days
+        elif interval == "1h":
+            mt5_tf = mt5.TIMEFRAME_H1
+            bars = days * 24
+        elif interval == "4h":
+            mt5_tf = mt5.TIMEFRAME_H4
+            bars = days * 6
+        elif interval == "15m":
+            mt5_tf = mt5.TIMEFRAME_M15
+            bars = days * 96
+        elif interval == "1m":
+            mt5_tf = mt5.TIMEFRAME_M1
+            bars = days * 1440
+        else:
+            mt5_tf = mt5.TIMEFRAME_D1
+            bars = days
+            
+        rates = mt5.copy_rates_from_pos(ticker, mt5_tf, 0, bars)
+        if rates is None or len(rates) == 0:
+            return None
+            
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df = df.rename(
+            columns={
+                "time": "Datetime",
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "tick_volume": "Volume",
+            }
+        )
+        return df[["Datetime", "Open", "High", "Low", "Close", "Volume"]]
+    except Exception as e:
+        log.error(f"Error MT5 download: {e}")
         return None
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    df = df.reset_index()
-    if "Date" in df.columns:
-        df = df.rename(columns={"Date": "Datetime"})
-    elif "index" in df.columns:
-        df = df.rename(columns={"index": "Datetime"})
-    return (
-        df if all(c in df.columns for c in ["Open", "High", "Low", "Close"]) else None
-    )
 
 
 def resample_to_4h(df_1h):
@@ -887,25 +909,20 @@ def handle_action(chat_id, action):
     elif action == "cmd_price":
         tg_send(chat_id, "💰 *Consultando precios actuales\\.\\.\\.*")
         msg = "📊 *Precios en Vivo*\n━━━━━━━━━━━━━━━━━━━━\n"
-        for pair, config in PAIRS.items():
-            try:
-                import yfinance as yf
-
-                # Bajar datos de 1 minuto del día actual para precio en vivo
-                df = yf.download(
-                    config["ticker"], period="1d", interval="1m", progress=False
-                )
-                if df is not None and not df.empty:
-                    last_price = df["Close"].iloc[-1]
-                    import pandas as pd
-
-                    if isinstance(last_price, pd.Series):
-                        last_price = last_price.iloc[0]
-                    flag = PAIR_FLAGS.get(pair, "💱")
-                    msg += f"{flag} *{pair}:* `{float(last_price):.{config['decimals']}f}`\n"
-            except Exception as e:
-                log.error(f"Error price {pair}: {e}")
-        msg += "━━━━━━━━━━━━━━━━━━━━\n_Datos vía Yahoo Finance_"
+        import MetaTrader5 as mt5
+        if mt5.initialize():
+            for pair, config in PAIRS.items():
+                try:
+                    tick = mt5.symbol_info_tick(config["ticker"])
+                    if tick is not None:
+                        last_price = tick.bid
+                        flag = PAIR_FLAGS.get(pair, "💱")
+                        msg += f"{flag} *{pair}:* `{float(last_price):.{config['decimals']}f}`\n"
+                except Exception as e:
+                    log.error(f"Error price {pair}: {e}")
+            msg += "━━━━━━━━━━━━━━━━━━━━\n_Datos vía MetaTrader 5_"
+        else:
+            msg += "_Error al conectar a MetaTrader 5_"
         tg_send_keyboard(chat_id, msg.replace(".", "\\."))
 
     elif action == "cmd_active":

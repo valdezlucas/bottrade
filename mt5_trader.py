@@ -59,6 +59,9 @@ MT5_PAIRS = {
     "USDJPY": {"symbol": "USDJPY", "spread": 1.2, "pip": 0.01, "decimals": 3},
     "EURJPY": {"symbol": "EURJPY", "spread": 1.5, "pip": 0.01, "decimals": 3},
     "GBPJPY": {"symbol": "GBPJPY", "spread": 2.0, "pip": 0.01, "decimals": 3},
+    "EURGBP": {"symbol": "EURGBP", "spread": 1.5, "pip": 0.0001, "decimals": 5},
+    "EURAUD": {"symbol": "EURAUD", "spread": 2.0, "pip": 0.0001, "decimals": 5},
+    "GBPAUD": {"symbol": "GBPAUD", "spread": 2.5, "pip": 0.0001, "decimals": 5},
     # Acciones Robustas
     "MSFT": {"symbol": "MSFT", "spread": 5.0, "pip": 0.01, "decimals": 2},
     "TSLA": {"symbol": "TSLA", "spread": 5.0, "pip": 0.01, "decimals": 2},
@@ -100,7 +103,7 @@ def connect_mt5():
     return True
 
 
-def get_mt5_data(symbol, timeframe=mt5.TIMEFRAME_D1, bars=120):
+def get_mt5_data(symbol, timeframe=mt5.TIMEFRAME_D1, bars=200):
     """Obtiene datos OHLC directamente de MT5."""
     rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, bars)
     if rates is None or len(rates) == 0:
@@ -146,10 +149,10 @@ def generate_mt5_signal(df, model_artifact):
         prob_buy = probas[1]
         prob_sell = probas[2]
 
-        if prob_buy >= threshold:
+        if prob_buy >= threshold and prob_buy > prob_sell:
             signal = "BUY"
             confidence = prob_buy
-        elif prob_sell >= threshold:
+        elif prob_sell >= threshold and prob_sell > prob_buy:
             signal = "SELL"
             confidence = prob_sell
     else:
@@ -431,7 +434,7 @@ def run_mt5_scanner(
             continue
 
         # Obtener datos de MT5
-        df = get_mt5_data(symbol, mt5_tf, 120)
+        df = get_mt5_data(symbol, mt5_tf, 200)
         if df is None or len(df) < 60:
             print(f"❌ Sin datos suficientes")
             continue
