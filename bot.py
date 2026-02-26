@@ -334,9 +334,9 @@ def run_scan(timeframe="Daily"):
     if timeframe == "4H":
         yf_interval, yf_days = "1h", 90  # descarga 1h y resamplea
     elif timeframe == "BTC_Daily":
-        yf_interval, yf_days = "1d", 120
+        yf_interval, yf_days = "1d", 200
     else:
-        yf_interval, yf_days = "1d", 120
+        yf_interval, yf_days = "1d", 200
 
     signals = []
 
