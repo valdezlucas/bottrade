@@ -356,7 +356,8 @@ def db_can_receive_signal(chat_id):
 
 if __name__ == "__main__":
     # Test simple
-    logging.basicConfig(level=logging.INFO)
+    import sys
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
     if db:
         print("Probando escritura...")
         db_init_user_account(12345, "TestUser", "tester")
