@@ -8,14 +8,26 @@ Broadcasts signals via Telegram to active subscribers every hour.
 """
 
 import os
+import sys
 import time
 from datetime import datetime
+import logging
 
 import joblib
 import numpy as np
 import pandas as pd
 import requests
 import schedule
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+
+logging.basicConfig(
+    format="%(asctime)s — %(levelname)s — %(message)s",
+    level=logging.INFO,
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
 
 from features import create_features
 from firebase_manager import db_can_receive_signal, db_get_subscribers
@@ -44,7 +56,7 @@ def tg_send(chat_id, text, parse_mode="MarkdownV2"):
         )
         return r.json().get("ok", False)
     except Exception as e:
-        print(f"Error tg_send: {e}")
+        log.error(f"Error tg_send: {e}")
         return False
 
 
@@ -53,7 +65,7 @@ def broadcast_shitcoin_signal(
 ):
     """Envía la alerta a todos los suscriptores activos."""
     if not TELEGRAM_BOT_TOKEN:
-        print("No BOT_TOKEN configured. Cannot broadcast.")
+        log.warning("No BOT_TOKEN configured. Cannot broadcast.")
         return
 
     subs = db_get_subscribers()
@@ -99,7 +111,7 @@ def broadcast_shitcoin_signal(
                 sent += 1
             time.sleep(0.05)
 
-    print(f"   📣 Broadcast finalizado: {sent} usuarios notificados.")
+    log.info(f"   📣 Broadcast finalizado: {sent} usuarios notificados.")
 
 
 def get_binance_extremes():
@@ -107,17 +119,20 @@ def get_binance_extremes():
     url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
     try:
         resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            log.error(f"Binance Fetch Error {resp.status_code}: {resp.text}")
+            return []
         data = resp.json()
     except Exception as e:
-        print(f"Error fetching Binance: {e}")
+        log.error(f"Error fetching Binance: {e}")
         return []
 
     if isinstance(data, dict) and "msg" in data:
-        print(f"Binance API Error: {data}")
+        log.error(f"Binance API Error: {data}")
         return []
 
     if not isinstance(data, list):
-        print(f"Unexpected Binance response format: type={type(data)}")
+        log.error(f"Unexpected Binance response format: {str(data)[:200]}")
         return []
 
     extremes = []
@@ -160,6 +175,9 @@ def fetch_binance_ohlcv(symbol, interval="1h", limit=120):
     url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
         resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            log.error(f"Binance API Error in klines {symbol} (HTTP {resp.status_code}): {resp.text}")
+            return None
         data = resp.json()
         df = pd.DataFrame(
             data,
@@ -187,11 +205,9 @@ def fetch_binance_ohlcv(symbol, interval="1h", limit=120):
 
 
 def run_scan_job():
-    print(f"\n============================================================")
-    print(
-        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚀 SCANNER SHITCOINS 1H RUNNING"
-    )
-    print(f"============================================================")
+    log.info("============================================================")
+    log.info("🚀 SCANNER SHITCOINS 1H RUNNING")
+    log.info("============================================================")
 
     try:
         art = joblib.load("model_shitcoins_1h.joblib")
@@ -199,14 +215,14 @@ def run_scan_job():
         feature_cols = art["feature_columns"]
         threshold = art["threshold"]
     except Exception as e:
-        print(f"❌ Error al cargar modelo: {e}")
+        log.error(f"❌ Error al cargar modelo: {e}")
         return []
 
     extremes = get_binance_extremes()
     if not extremes:
-        print("❌ No se pudieron obtener extremos de Binance (Posible bloqueo de IP).")
+        log.error("❌ No se pudieron obtener extremos de Binance (Posible bloqueo de IP).")
         return []
-    print(
+    log.info(
         f"🔥 Encontrados {len(extremes)} pares con > {MIN_VOLATILITY_PCT}% volatilidad y liquidez."
     )
 
@@ -216,14 +232,14 @@ def run_scan_job():
         vol = asset["volume"] / 1e6
 
         dir_emoji = "🚀 PUMP" if pct > 0 else "🩸 DUMP"
-        print(f"\n{dir_emoji} | {sym} | 24h: {pct:+.2f}% | Vol: ${vol:.1f}M")
+        log.info(f"{dir_emoji} | {sym} | 24h: {pct:+.2f}% | Vol: ${vol:.1f}M")
 
         fr = check_funding_rates(sym)
         if abs(fr) < FUNDING_RATE_THRESHOLD:
-            print(f"   ⚠️ Funding Normal ({fr*100:.3f}%). Saltando...")
+            log.info(f"   ⚠️ Funding Normal ({fr*100:.3f}%). Saltando...")
             continue
 
-        print(f"   🔥 Funding Extremo: {fr*100:.3f}%")
+        log.info(f"   🔥 Funding Extremo: {fr*100:.3f}%")
 
         df = fetch_binance_ohlcv(sym, "1h", limit=120)
         if df is None or len(df) < 100:
@@ -261,7 +277,7 @@ def run_scan_job():
             tp_dist = atr * 3.0  # Risk Reward 1:2 The Asymmetric nature of Shitcoins
 
             if p_sell > threshold and pct > 0:
-                print(f"   🎯 ALERTA IA: SHORT! Confianza: {p_sell*100:.1f}%")
+                log.info(f"   🎯 ALERTA IA: SHORT! Confianza: {p_sell*100:.1f}%")
                 sl = entry_price + sl_dist
                 tp = entry_price - tp_dist
                 broadcast_shitcoin_signal(
@@ -269,23 +285,23 @@ def run_scan_job():
                 )
 
             elif p_buy > threshold and pct < 0:
-                print(f"   🎯 ALERTA IA: LONG! Confianza: {p_buy*100:.1f}%")
+                log.info(f"   🎯 ALERTA IA: LONG! Confianza: {p_buy*100:.1f}%")
                 sl = entry_price - sl_dist
                 tp = entry_price + tp_dist
                 broadcast_shitcoin_signal(
                     sym, pct, vol, fr, "LONG", p_buy, entry_price, sl, tp, atr_pct
                 )
             else:
-                print(f"   ⏸️ IA Hold")
+                log.info(f"   ⏸️ IA Hold")
 
         except Exception as e:
-            print(f"   ❌ Error ML: {e}")
+            log.error(f"   ❌ Error ML: {e}")
 
 
 def main():
-    print("=" * 60)
-    print(" 🕒 INICIANDO SERVICIO DEMONIO SHITCOINS (CADA 1 HORA)")
-    print("=" * 60)
+    log.info("=" * 60)
+    log.info(" 🕒 INICIANDO SERVICIO DEMONIO SHITCOINS (CADA 1 HORA)")
+    log.info("=" * 60)
 
     # Run once immediately
     run_scan_job()
